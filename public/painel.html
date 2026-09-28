@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel FM — Transmitir Rádio Web</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif; }
+  body { background: #000; color: #fff; min-height: 100vh; overflow-x: hidden; }
+
+  /* ========== TELA DE LOGIN ========== */
+  #telaLogin {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #000;
+    gap: 40px;
+  }
+  #telaLogin h1 {
+    font-size: 90px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: #fff;
+  }
+  #telaLogin .campo {
+    width: 420px;
+    padding: 18px 24px;
+    border-radius: 40px;
+    border: none;
+    background: #fff;
+    color: #333;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    outline: none;
+  }
+  #telaLogin .campo::placeholder {
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: bold;
+  }
+  #telaLogin button {
+    background: #1fbf3f;
+    border: none;
+    color: #000;
+    font-size: 26px;
+    font-weight: 900;
+    padding: 14px 50px;
+    border-radius: 40px;
+    cursor: pointer;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: transform 0.15s, background 0.15s;
+  }
+  #telaLogin button:hover { background: #27d94b; transform: scale(1.03); }
+  #telaLogin button::after {
+    content: "➜";
+    font-size: 30px;
+    color: #fff;
+  }
+
+  /* ========== PAINEL PRINCIPAL ========== */
+  #telaPainel {
+    display: none;
+    height: 100vh;
+    padding: 10px;
+    background: #000;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+  #telaPainel.ativo { display: flex; }
+
+  /* ---- TOPO ---- */
+  .topo {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #4a4a4a;
+    border-radius: 12px;
+    padding: 8px 20px;
+    min-height: 76px;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .topo .nomeUsuario {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 32px; font-weight: 900; color: #fff;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  .topo .esquerda { display: flex; align-items: center; gap: 12px; }
+  .topo .direita { display: flex; align-items: center; gap: 12px; }
+  .topo .iconeBtn {
+    background: transparent; border: none; cursor: pointer;
+    font-size: 30px; color: #fff; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .topo .iconeBtn:hover { opacity: 0.75; transform: scale(1.08); }
+  .topo .iconeBtn svg {
+    width: 34px; height: 34px;
+    display: block;
+  }
+  .topo .badge {
+    position: absolute; top: -4px; right: -8px;
+    background: #ff2a2a; color: #fff;
+    font-size: 11px; font-weight: bold;
+    border-radius: 50%;
+    min-width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px;
+  }
+
+  .corpo {
+    display: grid;
+    grid-template-columns: 1fr 380px 1fr;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .bloco {
+    background: #000;
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-rows: 230px 1fr;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .bloco .cabecalho {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .quadroCinza {
+    background: #d9d9d9;
+    border-radius: 10px;
+    padding: 8px;
+    overflow-y: auto;
+    min-height: 0;
+    height: 100%;
+    position: relative;
+  }
+
+  .quadroCinza .btnAddDentro {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #2c2c2c;
+    border: 2px solid #555;
+    border-radius: 8px;
+    color: #fff; font-size: 22px; font-weight: bold;
+    width: 40px; height: 40px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 3;
+  }
+  .quadroCinza .btnAddDentro:hover { background: #444; }
+
+  .tituloDentroQuadro {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 900;
+    color: #000;
+    padding: 6px 0 10px 0;
+    border-bottom: 2px solid #bbb;
+    margin-bottom: 8px;
+  }
+
+  .quadroCinza .item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    color: #000;
+    font-size: 12px;
+    font-weight: bold;
+    padding-right: 60px;
+  }
+  .quadroCinza .item.tocando {
+    background: #b8e6b8;
+  }
+  .quadroCinza .item .info { display: flex; align-items: center; gap: 8px; }
+  .quadroCinza .item .play {
+    width: 26px; height: 26px;
+    background: #000;
+    color: #fff;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 12px;
+    flex-shrink: 0;
+  }
+  .quadroCinza .item .play:hover { background: #1a4ed8; }
+  .quadroCinza .item .apagar {
+    color: #ff2a2a;
+    cursor: pointer;
+    font-size: 10px;
+    background: #ffdada;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .quadroCinza .item .duracao {
+    color: #888;
+    font-size: 10px;
+    margin-left: 6px;
+  }
+
+  .btnQuadrado {
+    width: 40px; height: 40px;
+    background: #2c2c2c;
+    border: 2px solid #555;
+    border-radius: 8px;
+    color: #fff; font-size: 22px; font-weight: bold;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .btnQuadrado:hover { background: #444; }
+
+  .linhaVinhetas {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bolinha {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; color: #000; font-size: 16px;
+    border: 3px solid #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .bolinha.amarela { background: #ffd400; }
+  .bolinha.verde { background: #1fbf3f; }
+  .bolinha.vermelha { background: #ff2a2a; }
+
+  .linhaAoVivo {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-top: auto;
+    margin-bottom: 4px;
+  }
+  .btnAoVivo {
+    background: #fff;
+    color: #1a4ed8;
+    font-size: 16px; font-weight: 900;
+    padding: 6px 18px;
+    border-radius: 14px;
+    border: 3px solid #1a4ed8;
+    cursor: pointer;
+    letter-spacing: 1.5px;
+  }
+  .btnAoVivo.ligado {
+    background: #1fbf3f;
+    color: #fff;
+    border-color: #1fbf3f;
+  }
+
+  .btnReproduzir {
+    background: #fff;
+    color: #1a4ed8;
+    font-size: 11px; font-weight: 900;
+    padding: 5px 10px;
+    border-radius: 14px;
+    border: 3px solid #1a4ed8;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    width: 130px;
+    text-align: center;
+    margin-top: auto;
+    margin-bottom: 4px;
+    align-self: center;
+  }
+  .btnReproduzir.ligado {
+    background: #1fbf3f; color: #fff; border-color: #1fbf3f;
+  }
+
+  .visor {
+    border-radius: 8px;
+    padding: 14px;
+    background: #4fc3f7;
+    border: 4px solid #a020c0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-weight: bold;
+    flex: 1;
+  }
+  .visor .linhaTop {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    font-size: 18px;
+    text-transform: lowercase;
+    text-align: center;
+    color: #000;
+    letter-spacing: 1px;
+    font-weight: 900;
+  }
+  .visor .linhaValores {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    flex: 1;
+  }
+  .visor .valor {
+    background: #4fc3f7;
+    border: 2px solid #b3e5fc;
+    border-radius: 4px;
+    padding: 20px 6px;
+    text-align: center;
+    color: #d32f2f;
+    font-size: 34px;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .visor .valor.nomeOuvinte {
+    font-size: 16px;
+    color: #003a5c;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding: 20px 6px;
+    align-items: center;
+  }
+
+  .areaSliders {
+    display: grid;
+    grid-template-columns: 60px 1fr 60px;
+    gap: 10px;
+    min-height: 0;
+    height: 100%;
+  }
+  .sliderVertical {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .sliderVertical .label {
+    font-size: 11px;
+    color: #ccc;
+    text-transform: uppercase;
+    font-weight: 900;
+    letter-spacing: 1px;
+  }
+  .sliderVertical input[type=range] {
+    writing-mode: bt-lr;
+    -webkit-appearance: slider-vertical;
+    width: 8px;
+    height: 170px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .sliderVertical input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    cursor: pointer;
+  }
+  #sliderMic::-webkit-slider-thumb { background: #ff2a2a; }
+  #sliderMidia::-webkit-slider-thumb { background: #1fbf3f; }
+
+  .luzes {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 100%;
+  }
+  .luzes .linha {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    font-weight: 900;
+    color: #000;
+  }
+  .luzes .lamp {
+    width: 11px; height: 11px; border-radius: 50%;
+    transition: transform 0.08s, box-shadow 0.08s, opacity 0.08s;
+    opacity: 0.25;
+  }
+  .luzes .lamp.acesa {
+    opacity: 1;
+    transform: scale(1.6);
+    box-shadow: 0 0 14px 4px currentColor,
+                0 0 24px 8px currentColor;
+  }
+  .luzes .barraBranca {
+    width: 5px; height: 50px;
+    background: #fff;
+    border-radius: 3px;
+    margin: 3px 0;
+    opacity: 0.3;
+    transition: opacity 0.08s, box-shadow 0.08s;
+  }
+  .luzes .barraBranca.ativa {
+    opacity: 1;
+    box-shadow: 0 0 10px 3px #fff;
+  }
+
+  .modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal.ativo { display: flex; }
+
+  .modalNotas .conteudo {
+    background: #fff;
+    color: #000;
+    width: 500px; max-width: 92%;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .modalNotas textarea {
+    width: 100%; min-height: 260px;
+    resize: vertical;
+    padding: 10px;
+    font-size: 15px;
+    border: 2px solid #ccc;
+    border-radius: 8px;
+    font-family: Arial, sans-serif;
+  }
+  .modalNotas .fechar {
+    align-self: flex-end;
+    background: #ff2a2a; color: #fff;
+    border: none; border-radius: 6px;
+    padding: 6px 14px; font-weight: bold;
+    cursor: pointer;
+  }
+
+  .modalChat .conteudo {
+    background: #d9d9d9;
+    color: #000;
+    width: 620px; max-width: 95%;
+    height: 520px; max-height: 92vh;
+    border-radius: 12px;
+    padding: 0;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .modalChat .cabecalho {
+    background: #4a4a4a;
+    color: #fff;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    font-size: 22px; font-weight: 900;
+  }
+  .modalChat .cabecalho .fechar {
+    background: #ff2a2a; color: #fff;
+    border: none; width: 34px; height: 34px;
+    border-radius: 6px;
+    font-size: 20px; font-weight: bold;
+    cursor: pointer;
+  }
+  .modalChat .colunas {
+    display: grid; grid-template-columns: 1fr 2fr;
+    flex: 1; overflow: hidden;
+  }
+  .modalChat .colUsuarios {
+    background: #fff;
+    border-right: 2px solid #bbb;
+    padding: 10px;
+    overflow-y: auto;
+    font-size: 14px;
+  }
+  .modalChat .colUsuarios .user {
+    padding: 6px 8px; border-bottom: 1px solid #eee;
+    font-weight: bold;
+  }
+  .modalChat .colMensagens {
+    background: #fff;
+    padding: 10px;
+    overflow-y: auto;
+    font-size: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .modalChat .msg { word-wrap: break-word; }
+  .modalChat .msg.ouvinte { color: #333; }
+  .modalChat .msg.eu { color: #ff2a2a; font-weight: bold; text-align: right; }
+  .modalChat .rodape {
+    display: flex; gap: 8px; padding: 10px;
+    background: #d9d9d9;
+    border-top: 2px solid #bbb;
+  }
+  .modalChat .rodape input {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 20px;
+    border: none;
+    font-size: 15px;
+    outline: none;
+  }
+  .modalChat .rodape button {
+    background: #4a4a4a; color: #fff;
+    border: none; border-radius: 50%;
+    width: 44px; height: 44px;
+    font-weight: bold; cursor: pointer;
+  }
+
+  .modalVinheta .conteudo {
+    background: #fff; color: #000;
+    padding: 20px; border-radius: 12px;
+    width: 420px; max-width: 92%;
+    text-align: center;
+  }
+  .modalVinheta h3 { margin-bottom: 14px; }
+  .modalVinheta .opcoes { display: flex; justify-content: center; gap: 16px; margin-bottom: 16px; }
+  .modalVinheta .opcoes .bolinha { width: 60px; height: 60px; font-size: 20px; }
+  .modalVinheta .fechar {
+    background: #ff2a2a; color: #fff; border: none;
+    border-radius: 8px; padding: 8px 16px;
+    font-weight: bold; cursor: pointer;
+  }
+
+  .modalSair .conteudo {
+    background: #fff; color: #000;
+    padding: 24px 28px;
+    border-radius: 14px;
+    width: 400px; max-width: 92%;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  .modalSair .conteudo h3 {
+    font-size: 22px;
+    font-weight: 900;
+    color: #000;
+  }
+  .modalSair .conteudo p {
+    font-size: 15px;
+    color: #333;
+  }
+  .modalSair .botoes {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  .modalSair .btnSim {
+    background: #ff2a2a;
+    color: #fff;
+    font-size: 16px; font-weight: 900;
+    padding: 10px 28px;
+    border: none; border-radius: 10px;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+  .modalSair .btnSim:hover { background: #d32020; }
+  .modalSair .btnNao {
+    background: #4a4a4a;
+    color: #fff;
+    font-size: 16px; font-weight: 900;
+    padding: 10px 28px;
+    border: none; border-radius: 10px;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+  .modalSair .btnNao:hover { background: #333; }
+</style>
+</head>
+<body>
+
+<section id="telaLogin">
+  <h1>LOGGIN</h1>
+  <input type="text" id="inputUsuarioLogin" class="campo" placeholder="CREI SEU USUÁRIO" maxlength="20">
+  <button id="btnCriarLogin">CRIAR</button>
+</section>
+
+<section id="telaPainel">
+
+  <div class="topo">
+    <!-- Botão SAIR com SVG -->
+    <div class="esquerda">
+      <button class="iconeBtn" id="btnSairConta" title="Sair da conta" aria-label="Sair da conta">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16 17L21 12L16 7" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 12H9" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="nomeUsuario" id="nomeUsuarioTopo">radio web</div>
+    <div class="direita">
+      <button class="iconeBtn" id="btnBlocoNotas" title="Bloco de notas">📝</button>
+      <button class="iconeBtn" id="btnAbrirChat" title="Mensagens">💬
+        <span class="badge" id="badgeMensagens">1</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="corpo">
+
+    <div class="bloco">
+      <div class="cabecalho">
+        <div class="linhaVinhetas">
+          <button class="btnQuadrado" id="btnAddVinheta" title="Adicionar vinheta">+</button>
+          <div class="bolinha amarela" data-vinheta="1" title="Vinheta 1">1</div>
+          <div class="bolinha verde"   data-vinheta="2" title="Vinheta 2">2</div>
+          <div class="bolinha vermelha" data-vinheta="3" title="Vinheta 3">3</div>
+        </div>
+        <div class="linhaAoVivo">
+          <button class="btnAoVivo" id="btnAoVivo">AO VIVO</button>
+        </div>
+      </div>
+      <div class="quadroCinza" id="playlistAoVivo">
+        <button class="btnAddDentro" id="btnAddMusicaAoVivo" title="Adicionar música ao vivo">+</button>
+        <div class="tituloDentroQuadro">AO VIVO</div>
+      </div>
+    </div>
+
+    <div class="bloco">
+      <div class="cabecalho">
+        <div class="visor">
+          <div class="linhaTop">
+            <span>cliques</span>
+            <span>ouvindo</span>
+            <span>online</span>
+          </div>
+          <div class="linhaValores">
+            <div class="valor" id="visorCliques">01</div>
+            <div class="valor nomeOuvinte" id="visorOuvindo">—</div>
+            <div class="valor" id="visorTotal">00</div>
+          </div>
+        </div>
+      </div>
+      <div class="areaSliders">
+        <div class="sliderVertical">
+          <span class="label">MIC</span>
+          <input type="range" id="sliderMic" min="0" max="100" value="70">
+        </div>
+
+        <div class="quadroCinza luzes" id="painelLuzes">
+          <div class="linha"><span class="lamp" data-luz="0" style="background:#ff2a2a; color:#ff2a2a"></span> 0</div>
+          <div class="linha"><span class="lamp" data-luz="1" style="background:#ffd400; color:#ffd400"></span> 1</div>
+          <div class="linha"><span class="lamp" data-luz="2" style="background:#1fbf3f; color:#1fbf3f"></span> 2</div>
+          <div class="linha"><span class="lamp" data-luz="3" style="background:#ffd400; color:#ffd400"></span> 3</div>
+          <div class="linha"><span class="lamp" data-luz="4" style="background:#ff2a2a; color:#ff2a2a"></span> 4</div>
+          <div class="linha"><span class="lamp" data-luz="5" style="background:#4a90e2; color:#4a90e2"></span> 5</div>
+          <div class="linha"><span class="lamp" data-luz="6" style="background:#1fbf3f; color:#1fbf3f"></span> 6</div>
+          <div class="linha"><span class="lamp" data-luz="7" style="background:#ffd400; color:#ffd400"></span> 7</div>
+          <div class="linha"><span class="lamp" data-luz="8" style="background:#ff2a2a; color:#ff2a2a"></span> 8</div>
+          <div class="linha"><span class="lamp" data-luz="9" style="background:#4a90e2; color:#4a90e2"></span> 9</div>
+          <div class="barraBranca" id="barraBranca"></div>
+        </div>
+
+        <div class="sliderVertical">
+          <span class="label">MÍDIA</span>
+          <input type="range" id="sliderMidia" min="0" max="100" value="70">
+        </div>
+      </div>
+    </div>
+
+    <div class="bloco">
+      <div class="cabecalho">
+        <button class="btnReproduzir" id="btnReproduzirTodas">🔁 Reproduzir todas</button>
+      </div>
+      <div class="quadroCinza" id="playlistAutoDj">
+        <button class="btnAddDentro" id="btnAddMusicaAutoDj" title="Adicionar mídia">+</button>
+        <div class="tituloDentroQuadro">Auto DJ</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="modal modalNotas" id="modalNotas">
+  <div class="conteudo">
+    <textarea id="textoNotas" placeholder="Digite aqui suas anotações..."></textarea>
+    <button class="fechar" id="fecharNotas">Fechar ✕</button>
+  </div>
+</div>
+
+<div class="modal modalChat" id="modalChat">
+  <div class="conteudo">
+    <div class="cabecalho">
+      <span>chat</span>
+      <button class="fechar" id="fecharChat">✕</button>
+    </div>
+    <div class="colunas">
+      <div class="colUsuarios" id="chatUsuarios">
+        <div class="user">ouvinte</div>
+        <div class="user">ex=ouvinte</div>
+      </div>
+      <div class="colMensagens" id="chatMensagens">
+        <div class="msg ouvinte">ex=ouvinte: Olá, boa noite!</div>
+        <div class="msg eu">ex=eu anderson: Boa noite, tudo bem?</div>
+      </div>
+    </div>
+    <div class="rodape">
+      <input type="text" id="inputChat" placeholder="digita sua mensagem">
+      <button id="btnEnviarChat">ok</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal modalVinheta" id="modalVinheta">
+  <div class="conteudo">
+    <h3>Escolha o botão da vinheta</h3>
+    <div class="opcoes">
+      <div class="bolinha amarela" data-escolha="1">1</div>
+      <div class="bolinha verde"   data-escolha="2">2</div>
+      <div class="bolinha vermelha" data-escolha="3">3</div>
+    </div>
+    <button class="fechar" id="fecharVinheta">Cancelar</button>
+  </div>
+</div>
+
+<div class="modal modalSair" id="modalSair">
+  <div class="conteudo">
+    <h3>Sair da conta?</h3>
+    <p>Você tem certeza que deseja sair?<br>Você voltará para a tela de login.</p>
+    <div class="botoes">
+      <button class="btnNao" id="btnCancelarSair">Não</button>
+      <button class="btnSim" id="btnConfirmarSair">Sim, sair</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==========================================================
+   ESTADO GLOBAL
+   ========================================================== */
+const estado = {
+  usuario: '',
+  aoVivo: false,
+  reproduzirTodas: false,
+  cliques: 1,
+  ouvintes: [],
+};
+
+/* ==========================================================
+   PLAYER + ANALISADOR DE BATIDA
+   ========================================================== */
+const player = new Audio();
+player.crossOrigin = 'anonymous';
+let itemTocandoAgora = null;
+const filaAutoDj = [];
+
+let audioCtx = null;
+let analyser = null;
+let sourceNode = null;
+let dataArray = null;
+
+const HISTORICO = 40;
+let historicoEnergia = [];
+let ultimaBatida = 0;
+const INTERVALO_MIN_MS = 180;
+const MARGEM = 15;
+const ENERGIA_MIN = 25;
+
+let ledAtual = -1;
+
+function inicializarAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.55;
+
+    sourceNode = audioCtx.createMediaElementSource(player);
+    sourceNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    loopAnalise();
+  } catch (err) {
+    console.warn('Erro ao inicializar áudio:', err.message);
+  }
+}
+
+function acenderProximaLed() {
+  leds.forEach(l => l.classList.remove('acesa'));
+  ledAtual++;
+  if (ledAtual >= leds.length) ledAtual = 0;
+  if (leds[ledAtual]) {
+    leds[ledAtual].classList.add('acesa');
+    barraBranca.classList.add('ativa');
+    setTimeout(() => barraBranca.classList.remove('ativa'), 60);
+  }
+}
+
+function apagarTodasLeds() {
+  leds.forEach(l => l.classList.remove('acesa'));
+  barraBranca.classList.remove('ativa');
+  ledAtual = -1;
+  historicoEnergia = [];
+}
+
+function loopAnalise() {
+  requestAnimationFrame(loopAnalise);
+  if (!analyser || !dataArray) return;
+
+  analyser.getByteFrequencyData(dataArray);
+
+  const energia = (dataArray[0] + dataArray[1] + dataArray[2]) / 3;
+
+  historicoEnergia.push(energia);
+  if (historicoEnergia.length > HISTORICO) historicoEnergia.shift();
+
+  const media = historicoEnergia.reduce((a, b) => a + b, 0) / historicoEnergia.length;
+
+  const tocando = !player.paused && !player.ended && player.currentTime > 0;
+
+  if (!tocando) {
+    if (ledAtual !== -1) apagarTodasLeds();
+    return;
+  }
+
+  const agora = performance.now();
+  const ehBatida = (energia > media + MARGEM) && (energia > ENERGIA_MIN);
+
+  if (ehBatida && (agora - ultimaBatida) > INTERVALO_MIN_MS) {
+    ultimaBatida = agora;
+    acenderProximaLed();
+  }
+}
+
+/* ==========================================================
+   Referências
+   ========================================================== */
+const leds = document.querySelectorAll('#painelLuzes .lamp');
+const barraBranca = document.getElementById('barraBranca');
+
+/* ==========================================================
+   FUNÇÕES DE PLAYER
+   ========================================================== */
+function tocarItemDaFila(index) {
+  if (index < 0 || index >= filaAutoDj.length) return;
+  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+
+  const entrada = filaAutoDj[index];
+  player.src = entrada.url;
+  player.play().then(() => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }).catch(err => console.warn('Erro ao tocar:', err.message));
+
+  entrada.item.classList.add('tocando');
+  itemTocandoAgora = entrada.item;
+  itemTocandoAgora._indice = index;
+}
+
+function proximaMusica() {
+  if (filaAutoDj.length === 0) return;
+  const atual = itemTocandoAgora ? itemTocandoAgora._indice : -1;
+  let proximo = atual + 1;
+
+  if (proximo >= filaAutoDj.length) {
+    if (estado.reproduzirTodas) {
+      proximo = 0;
+    } else {
+      if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+      itemTocandoAgora = null;
+      return;
+    }
+  }
+  tocarItemDaFila(proximo);
+}
+
+player.addEventListener('ended', () => {
+  if (itemTocandoAgora && itemTocandoAgora._indice !== undefined) {
+    proximaMusica();
+  } else {
+    if (itemTocandoAgora) {
+      itemTocandoAgora.classList.remove('tocando');
+      itemTocandoAgora = null;
+    }
+    apagarTodasLeds();
+  }
+});
+
+player.addEventListener('pause', apagarTodasLeds);
+
+function tocarMusica(url, item) {
+  if (itemTocandoAgora === item && !player.paused) {
+    player.pause();
+    item.classList.remove('tocando');
+    itemTocandoAgora = null;
+    return;
+  }
+  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+  player.src = url;
+  player.play().then(() => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }).catch(err => console.warn(err.message));
+  item.classList.add('tocando');
+  itemTocandoAgora = item;
+  itemTocandoAgora._indice = undefined;
+}
+
+/* ==========================================================
+   TELA DE LOGIN
+   ========================================================== */
+const telaLogin   = document.getElementById('telaLogin');
+const telaPainel  = document.getElementById('telaPainel');
+const inputLogin  = document.getElementById('inputUsuarioLogin');
+const btnCriar    = document.getElementById('btnCriarLogin');
+
+const usuarioSalvo = localStorage.getItem('painelUsuario');
+if (usuarioSalvo) entrarNoPainel(usuarioSalvo);
+
+btnCriar.addEventListener('click', () => {
+  const nome = inputLogin.value.trim();
+  if (!nome) { alert('Digite um nome de usuário!'); return; }
+  localStorage.setItem('painelUsuario', nome);
+  entrarNoPainel(nome);
+});
+
+inputLogin.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') btnCriar.click();
+});
+
+function entrarNoPainel(nome) {
+  estado.usuario = nome;
+  telaLogin.style.display = 'none';
+  telaPainel.classList.add('ativo');
+  document.getElementById('nomeUsuarioTopo').textContent = nome.toLowerCase();
+}
+
+/* ==========================================================
+   TOPO
+   ========================================================== */
+const modalNotas   = document.getElementById('modalNotas');
+const modalChat    = document.getElementById('modalChat');
+const modalVinheta = document.getElementById('modalVinheta');
+const modalSair    = document.getElementById('modalSair');
+
+document.getElementById('btnBlocoNotas').addEventListener('click', () => {
+  modalNotas.classList.add('ativo');
+  document.getElementById('textoNotas').focus();
+});
+document.getElementById('fecharNotas').addEventListener('click', () => {
+  modalNotas.classList.remove('ativo');
+});
+
+document.getElementById('btnAbrirChat').addEventListener('click', () => {
+  modalChat.classList.add('ativo');
+  document.getElementById('badgeMensagens').style.display = 'none';
+});
+document.getElementById('fecharChat').addEventListener('click', () => {
+  modalChat.classList.remove('ativo');
+});
+
+/* ==========================================================
+   SAIR DA CONTA
+   ========================================================== */
+document.getElementById('btnSairConta').addEventListener('click', () => {
+  modalSair.classList.add('ativo');
+});
+
+document.getElementById('btnCancelarSair').addEventListener('click', () => {
+  modalSair.classList.remove('ativo');
+});
+
+document.getElementById('btnConfirmarSair').addEventListener('click', () => {
+  if (!player.paused) player.pause();
+  localStorage.removeItem('painelUsuario');
+  modalSair.classList.remove('ativo');
+  telaPainel.classList.remove('ativo');
+  telaLogin.style.display = 'flex';
+  inputLogin.value = '';
+  inputLogin.focus();
+});
+
+modalSair.addEventListener('click', (e) => {
+  if (e.target === modalSair) modalSair.classList.remove('ativo');
+});
+
+/* ==========================================================
+   BOTÃO AO VIVO
+   ========================================================== */
+const btnAoVivo = document.getElementById('btnAoVivo');
+btnAoVivo.addEventListener('click', () => {
+  estado.aoVivo = !estado.aoVivo;
+  btnAoVivo.classList.toggle('ligado', estado.aoVivo);
+});
+
+/* ==========================================================
+   VINHETAS
+   ========================================================== */
+document.getElementById('btnAddVinheta').addEventListener('click', () => {
+  modalVinheta.classList.add('ativo');
+});
+document.getElementById('fecharVinheta').addEventListener('click', () => {
+  modalVinheta.classList.remove('ativo');
+});
+
+document.querySelectorAll('.modalVinheta .bolinha').forEach(b => {
+  b.addEventListener('click', () => {
+    const escolha = b.dataset.escolha;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = (e) => {
+      const arquivo = e.target.files[0];
+      if (arquivo) {
+        const bolinha = document.querySelector(`.bolinha[data-vinheta="${escolha}"]`);
+        bolinha.title = arquivo.name;
+        bolinha.style.boxShadow = '0 0 10px #fff';
+        bolinha._arquivo = arquivo;
+      }
+    };
+    input.click();
+    modalVinheta.classList.remove('ativo');
+  });
+});
+
+document.querySelectorAll('.bolinha[data-vinheta]').forEach(b => {
+  b.addEventListener('click', () => {
+    if (b._arquivo) {
+      const url = URL.createObjectURL(b._arquivo);
+      const tmp = new Audio(url);
+      tmp.play().catch(err => console.warn(err));
+    }
+  });
+});
+
+/* ==========================================================
+   PLAYLISTS
+   ========================================================== */
+function criarItemPlaylist(arquivo, tipo) {
+  const item = document.createElement('div');
+  item.className = 'item';
+  const url = URL.createObjectURL(arquivo);
+  item._url = url;
+
+  item.innerHTML = `
+    <div class="info">
+      <div class="play">▶</div>
+      <span>${arquivo.name}</span>
+    </div>
+    <div>
+      <span class="duracao">--:--</span>
+      <span class="apagar">apagar</span>
+    </div>
+  `;
+
+  item.querySelector('.play').addEventListener('click', () => {
+    inicializarAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
+    if (tipo === 'autoDj') {
+      const idx = filaAutoDj.findIndex(e => e.item === item);
+      if (idx !== -1) {
+        if (itemTocandoAgora === item && !player.paused) {
+          player.pause();
+          item.classList.remove('tocando');
+          itemTocandoAgora = null;
+        } else {
+          tocarItemDaFila(idx);
+        }
+      }
+    } else {
+      tocarMusica(url, item);
+    }
+  });
+
+  item.querySelector('.apagar').addEventListener('click', () => {
+    if (itemTocandoAgora === item) {
+      player.pause();
+      itemTocandoAgora = null;
+    }
+    URL.revokeObjectURL(url);
+    if (tipo === 'autoDj') {
+      const idx = filaAutoDj.findIndex(e => e.item === item);
+      if (idx !== -1) filaAutoDj.splice(idx, 1);
+    }
+    item.remove();
+  });
+
+  const audioTemp = new Audio(url);
+  audioTemp.addEventListener('loadedmetadata', () => {
+    const min = Math.floor(audioTemp.duration / 60);
+    const seg = Math.floor(audioTemp.duration % 60).toString().padStart(2, '0');
+    item.querySelector('.duracao').textContent = `${min}:${seg}`;
+  });
+
+  return item;
+}
+
+document.getElementById('btnAddMusicaAoVivo').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.onchange = (e) => {
+    const arquivo = e.target.files[0];
+    if (arquivo) {
+      const item = criarItemPlaylist(arquivo, 'aoVivo');
+      document.getElementById('playlistAoVivo').appendChild(item);
+    }
+  };
+  input.click();
+});
+
+document.getElementById('btnAddMusicaAutoDj').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.multiple = true;
+  input.onchange = (e) => {
+    Array.from(e.target.files).forEach(arquivo => {
+      const item = criarItemPlaylist(arquivo, 'autoDj');
+      document.getElementById('playlistAutoDj').appendChild(item);
+      filaAutoDj.push({ url: item._url, item, arquivo });
+    });
+  };
+  input.click();
+});
+
+const btnReproduzirTodas = document.getElementById('btnReproduzirTodas');
+btnReproduzirTodas.addEventListener('click', () => {
+  inicializarAudio();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
+  estado.reproduzirTodas = !estado.reproduzirTodas;
+  btnReproduzirTodas.classList.toggle('ligado', estado.reproduzirTodas);
+
+  if (estado.reproduzirTodas && !itemTocandoAgora && filaAutoDj.length > 0) {
+    tocarItemDaFila(0);
+  }
+});
+
+/* ==========================================================
+   SLIDERS
+   ========================================================== */
+document.getElementById('sliderMic').addEventListener('input', () => {});
+document.getElementById('sliderMidia').addEventListener('input', (e) => {
+  player.volume = e.target.value / 100;
+});
+
+/* ==========================================================
+   CHAT
+   ========================================================== */
+document.getElementById('btnEnviarChat').addEventListener('click', enviarMsgChat);
+document.getElementById('inputChat').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') enviarMsgChat();
+});
+
+function enviarMsgChat() {
+  const input = document.getElementById('inputChat');
+  const texto = input.value.trim();
+  if (!texto) return;
+  const msg = document.createElement('div');
+  msg.className = 'msg eu';
+  msg.textContent = `ex=eu ${estado.usuario}: ${texto}`;
+  document.getElementById('chatMensagens').appendChild(msg);
+  document.getElementById('chatMensagens').scrollTop = 99999;
+  input.value = '';
+}
+
+/* ==========================================================
+   VISOR
+   ========================================================== */
+function atualizarVisor() {
+  document.getElementById('visorCliques').textContent = String(estado.cliques).padStart(2,'0');
+  document.getElementById('visorTotal').textContent = String(estado.ouvintes.length).padStart(2,'0');
+  document.getElementById('visorOuvindo').textContent = 
+    estado.ouvintes.length > 0 ? estado.ouvintes[estado.ouvintes.length - 1] : '—';
+}
+atualizarVisor();
+
+setInterval(() => {
+  if (Math.random() > 0.85 && estado.ouvintes.length < 5) {
+    const nomes = ['anderson','maria','joao','carla','pedro'];
+    const nome = nomes[Math.floor(Math.random()*nomes.length)];
+    estado.ouvintes.push(nome);
+    estado.cliques++;
+    atualizarVisor();
+    const usuarios = document.getElementById('chatUsuarios');
+    const div = document.createElement('div');
+    div.className = 'user';
+    div.textContent = nome;
+    usuarios.appendChild(div);
+  }
+}, 8000);
+</script>
+</body>
+</html>
