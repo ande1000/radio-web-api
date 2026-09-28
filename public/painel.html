@@ -127,27 +127,41 @@
   .visor {
     border-radius: 8px; padding: 14px; background: #4fc3f7; border: 4px solid #a020c0;
     display: flex; flex-direction: column; gap: 10px; font-weight: bold; flex: 1;
+    min-height: 0;
   }
   .visor .linhaTop {
     display: grid; grid-template-columns: 1fr 1fr 1fr; font-size: 18px;
     text-transform: lowercase; text-align: center; color: #000; font-weight: 900;
   }
-  .visor .linhaValores { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: 1; }
+  .visor .linhaValores { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: 1; min-height: 0; }
   .visor .valor {
     background: #4fc3f7; border: 2px solid #b3e5fc; border-radius: 4px;
     padding: 20px 6px; text-align: center; color: #d32f2f; font-size: 34px; font-weight: 900;
     display: flex; align-items: center; justify-content: center;
   }
+  /* 🔴 VISOR "OUVINDO" AGORA É UMA LISTA COM SCROLL */
   .visor .valor.nomeOuvinte {
-    font-size: 16px; color: #003a5c; overflow: hidden; white-space: nowrap;
-    text-overflow: ellipsis; padding: 20px 6px;
+    font-size: 14px; color: #003a5c; overflow-y: auto; overflow-x: hidden;
+    padding: 8px 6px; display: flex; flex-direction: column; align-items: stretch;
+    gap: 4px; text-align: left; justify-content: flex-start;
+    scrollbar-width: thin;
+  }
+  .visor .valor.nomeOuvinte::-webkit-scrollbar { width: 6px; }
+  .visor .valor.nomeOuvinte::-webkit-scrollbar-thumb { background: #0288d1; border-radius: 3px; }
+  .visor .valor.nomeOuvinte .ouvinteItem {
+    background: rgba(255,255,255,0.5); border-radius: 4px;
+    padding: 4px 8px; font-size: 13px; font-weight: 900;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #003a5c;
+  }
+  .visor .valor.nomeOuvinte .vazio {
+    font-size: 13px; color: #003a5c; opacity: 0.6;
+    text-align: center; margin-top: 12px; font-style: italic;
   }
 
   .areaSliders { display: grid; grid-template-columns: 60px 1fr 60px; gap: 10px; min-height: 0; height: 100%; }
   .sliderVertical { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; }
-  .sliderVertical .label {
-    font-size: 11px; color: #ccc; text-transform: uppercase; font-weight: 900;
-  }
+  .sliderVertical .label { font-size: 11px; color: #ccc; text-transform: uppercase; font-weight: 900; }
   .sliderVertical input[type=range] {
     writing-mode: bt-lr; -webkit-appearance: slider-vertical;
     width: 8px; height: 170px; background: transparent; cursor: pointer;
@@ -178,10 +192,7 @@
   }
   .luzes .barraBranca.ativa { opacity: 1; box-shadow: 0 0 10px 3px #fff; }
 
-  .modal {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-    z-index: 1000; align-items: center; justify-content: center;
-  }
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
   .modal.ativo { display: flex; }
 
   .modalNotas .conteudo {
@@ -192,14 +203,14 @@
     width: 100%; min-height: 260px; resize: vertical; padding: 10px; font-size: 15px;
     border: 2px solid #ccc; border-radius: 8px; font-family: Arial, sans-serif;
   }
-  .modalNotas .fechar {
-    align-self: flex-end; background: #ff2a2a; color: #fff;
-    border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer;
-  }
+  .modalNotas .fechar { align-self: flex-end; background: #ff2a2a; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; }
 
+  /* ==========================================================
+     CHAT ESTILO WHATSAPP
+     ========================================================== */
   .modalChat .conteudo {
-    background: #d9d9d9; color: #000; width: 620px; max-width: 95%;
-    height: 520px; max-height: 92vh; border-radius: 12px; padding: 0;
+    background: #d9d9d9; color: #000; width: 760px; max-width: 95%;
+    height: 560px; max-height: 92vh; border-radius: 12px; padding: 0;
     overflow: hidden; display: flex; flex-direction: column;
   }
   .modalChat .cabecalho {
@@ -211,22 +222,61 @@
     border-radius: 6px; font-size: 20px; font-weight: bold; cursor: pointer;
   }
   .modalChat .colunas {
-    display: grid; grid-template-columns: 1fr 2fr; flex: 1; overflow: hidden;
+    display: grid; grid-template-columns: 220px 1fr; flex: 1; overflow: hidden;
   }
   .modalChat .colUsuarios {
-    background: #fff; border-right: 2px solid #bbb; padding: 10px;
-    overflow-y: auto; font-size: 14px;
+    background: #fff; border-right: 2px solid #bbb; overflow-y: auto; font-size: 14px;
   }
   .modalChat .colUsuarios .user {
-    padding: 6px 8px; border-bottom: 1px solid #eee; font-weight: bold;
+    padding: 12px 14px; border-bottom: 1px solid #eee; font-weight: bold;
+    cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+    transition: background 0.15s;
+  }
+  .modalChat .colUsuarios .user:hover { background: #f0f0f0; }
+  .modalChat .colUsuarios .user.ativo { background: #4a4a4a; color: #fff; }
+  .modalChat .colUsuarios .user .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #1fbf3f; flex-shrink: 0;
+  }
+  .modalChat .colUsuarios .user .nome {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-right: 8px;
+  }
+  .modalChat .colUsuarios .user .contador {
+    background: #ff2a2a; color: #fff; font-size: 10px;
+    min-width: 18px; height: 18px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 5px; font-weight: 900;
   }
   .modalChat .colMensagens {
-    background: #fff; padding: 10px; overflow-y: auto; font-size: 14px;
+    background: #ece5dd; padding: 12px; overflow-y: auto; font-size: 14px;
     display: flex; flex-direction: column; gap: 6px;
   }
-  .modalChat .msg { word-wrap: break-word; }
-  .modalChat .msg.ouvinte { color: #333; }
-  .modalChat .msg.eu { color: #ff2a2a; font-weight: bold; text-align: right; }
+  .modalChat .colMensagens .vazio {
+    text-align: center; color: #888; font-style: italic; margin-top: 20px;
+  }
+  .modalChat .msg {
+    max-width: 70%; padding: 8px 12px; border-radius: 10px;
+    word-wrap: break-word; line-height: 1.3; position: relative;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.15);
+  }
+  .modalChat .msg .autor {
+    font-size: 10px; font-weight: 900; display: block; margin-bottom: 2px;
+    opacity: 0.75;
+  }
+  .modalChat .msg .hora {
+    font-size: 9px; color: #666; float: right; margin-left: 8px; margin-top: 4px;
+  }
+  /* Mensagem recebida (do ouvinte) */
+  .modalChat .msg.recebida {
+    background: #fff; color: #000; align-self: flex-start;
+    border-bottom-left-radius: 2px;
+  }
+  /* Mensagem enviada (do locutor) */
+  .modalChat .msg.enviada {
+    background: #dcf8c6; color: #000; align-self: flex-end;
+    border-bottom-right-radius: 2px;
+  }
+  .modalChat .msg.privada { border: 2px dashed #a020c0; }
   .modalChat .rodape {
     display: flex; gap: 8px; padding: 10px; background: #d9d9d9; border-top: 2px solid #bbb;
   }
@@ -237,6 +287,7 @@
     background: #4a4a4a; color: #fff; border: none; border-radius: 50%;
     width: 44px; height: 44px; font-weight: bold; cursor: pointer;
   }
+  .modalChat .rodape button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .modalVinheta .conteudo {
     background: #fff; color: #000; padding: 20px; border-radius: 12px;
@@ -245,10 +296,7 @@
   .modalVinheta h3 { margin-bottom: 14px; }
   .modalVinheta .opcoes { display: flex; justify-content: center; gap: 16px; margin-bottom: 16px; }
   .modalVinheta .opcoes .bolinha { width: 60px; height: 60px; font-size: 20px; }
-  .modalVinheta .fechar {
-    background: #ff2a2a; color: #fff; border: none; border-radius: 8px;
-    padding: 8px 16px; font-weight: bold; cursor: pointer;
-  }
+  .modalVinheta .fechar { background: #ff2a2a; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-weight: bold; cursor: pointer; }
 
   .modalSair .conteudo {
     background: #fff; color: #000; padding: 24px 28px; border-radius: 14px;
@@ -257,14 +305,8 @@
   }
   .modalSair .conteudo h3 { font-size: 22px; font-weight: 900; }
   .modalSair .botoes { display: flex; justify-content: center; gap: 12px; }
-  .modalSair .btnSim {
-    background: #ff2a2a; color: #fff; font-size: 16px; font-weight: 900;
-    padding: 10px 28px; border: none; border-radius: 10px; cursor: pointer;
-  }
-  .modalSair .btnNao {
-    background: #4a4a4a; color: #fff; font-size: 16px; font-weight: 900;
-    padding: 10px 28px; border: none; border-radius: 10px; cursor: pointer;
-  }
+  .modalSair .btnSim { background: #ff2a2a; color: #fff; font-size: 16px; font-weight: 900; padding: 10px 28px; border: none; border-radius: 10px; cursor: pointer; }
+  .modalSair .btnNao { background: #4a4a4a; color: #fff; font-size: 16px; font-weight: 900; padding: 10px 28px; border: none; border-radius: 10px; cursor: pointer; }
 
   .statusConexao {
     position: fixed; top: 8px; right: 8px; z-index: 9999;
@@ -332,7 +374,9 @@
           </div>
           <div class="linhaValores">
             <div class="valor" id="visorCliques">00</div>
-            <div class="valor nomeOuvinte" id="visorOuvindo">—</div>
+            <div class="valor nomeOuvinte" id="visorOuvindo">
+              <div class="vazio">ninguém ouvindo</div>
+            </div>
             <div class="valor" id="visorTotal">00</div>
           </div>
         </div>
@@ -388,9 +432,7 @@
       <button class="fechar" id="fecharChat">✕</button>
     </div>
     <div class="colunas">
-      <div class="colUsuarios" id="chatUsuarios">
-        <div class="user">você (locutor)</div>
-      </div>
+      <div class="colUsuarios" id="chatUsuarios"></div>
       <div class="colMensagens" id="chatMensagens"></div>
     </div>
     <div class="rodape">
@@ -435,15 +477,19 @@ const STREAM_TOKEN = 'radio-anderson-2026-x7k9p2m4n8q1';
    ========================================================== */
 const estado = {
   usuario: '',
-  aoVivo: false,               // Mic ligado?
-  transmitindo: false,         // Enviando áudio via WS?
+  aoVivo: false,
+  transmitindo: false,
   reproduzirTodas: false,
   ouvintes: [],
   conectado: false,
   musicaTocando: false,
+  contatoAtivo: null,        // 🔴 contato selecionado no chat
 };
 
 let ws = null;
+
+// 🔴 Mapa de mensagens por contato: { nomeContato: [ {user, text, role, time} ] }
+const conversas = new Map();
 
 /* ==========================================================
    ÁUDIO
@@ -466,7 +512,7 @@ const player = new Audio();
 player.crossOrigin = 'anonymous';
 let itemTocandoAgora = null;
 const filaAutoDj = [];
-const filaAoVivo = [];        // lista da playlist AO VIVO
+const filaAoVivo = [];
 
 let analyser = null;
 let dataArray = null;
@@ -498,20 +544,32 @@ function conectarWS() {
       const msg = JSON.parse(event.data);
 
       if (msg.type === 'ready') console.log('🎙️ Pronto');
+
       if (msg.type === 'meta') {
         if (msg.listeners !== undefined) {
-          atualizarVisor(msg.listeners);
+          atualizarVisorContagem(msg.listeners);
         }
       }
+
+      // 🔴 Lista de nomes de ouvintes
+      if (msg.type === 'ouvintes') {
+        atualizarListaOuvintes(msg.nomes, msg.total);
+      }
+
+      // 🔴 Chat: recebe e armazena por contato
       if (msg.type === 'chat') {
-        receberChat(msg);
-        if (msg.role === 'listener') adicionarUsuarioChat(msg.user);
+        registrarMensagem(msg);
       }
+
       if (msg.type === 'usuarios') {
-        atualizarListaUsuarios(msg.lista);
+        // mantém compatibilidade — não usado mais pra lista de contatos
       }
+
+      if (msg.type === 'historico') {
+        msg.mensagens.forEach(m => registrarMensagem(m, true));
+      }
+
       if (msg.type === 'error') {
-        // Alerta o usuário mas não bloqueia — só loga
         console.warn('Erro do servidor:', msg.message);
         if (msg.message === 'Já existe transmissão ativa') {
           atualizarStatusConexao(false);
@@ -600,7 +658,6 @@ async function inicializarAudio() {
 
   processorNode = audioCtx.createScriptProcessor(8192, 1, 1);
   processorNode.onaudioprocess = (e) => {
-    // 🔴 TRANSMITE SEMPRE que a fila estiver tocando OU o AO VIVO estiver ligado
     const deveEnviar = estado.aoVivo || estado.musicaTocando;
     if (!deveEnviar || !ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -659,7 +716,7 @@ function desligarMicrofone() {
 }
 
 /* ==========================================================
-   AO VIVO — só liga/desliga o mic
+   AO VIVO
    ========================================================== */
 const btnAoVivo = document.getElementById('btnAoVivo');
 btnAoVivo.addEventListener('click', async () => {
@@ -738,7 +795,6 @@ function tocarItemDaFila(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'autodj';
   estado.musicaTocando = true;
-
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -746,7 +802,6 @@ function proximaMusica() {
   if (filaAutoDj.length === 0) return;
   const atual = itemTocandoAgora && itemTocandoAgora._origem === 'autodj' ? itemTocandoAgora._indice : -1;
   let proximo = atual + 1;
-
   if (proximo >= filaAutoDj.length) {
     if (estado.reproduzirTodas) proximo = 0;
     else {
@@ -760,7 +815,7 @@ function proximaMusica() {
 }
 
 /* ==========================================================
-   PLAYER — Playlist AO VIVO (toca em sequência também)
+   PLAYER — Playlist AO VIVO
    ========================================================== */
 function tocarItemAoVivo(index) {
   if (index < 0 || index >= filaAoVivo.length) return;
@@ -777,7 +832,6 @@ function tocarItemAoVivo(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'aovivo';
   estado.musicaTocando = true;
-
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -785,43 +839,25 @@ function proximaMusicaAoVivo() {
   if (filaAoVivo.length === 0) return;
   const atual = itemTocandoAgora && itemTocandoAgora._origem === 'aovivo' ? itemTocandoAgora._indice : -1;
   let proximo = atual + 1;
-
-  if (proximo >= filaAoVivo.length) {
-    // volta pro início em loop
-    proximo = 0;
-  }
+  if (proximo >= filaAoVivo.length) proximo = 0;
   tocarItemAoVivo(proximo);
 }
 
-/* ==========================================================
-   EVENTO ENDED — decide qual fila avançar
-   ========================================================== */
 player.addEventListener('ended', () => {
   if (!itemTocandoAgora) return;
-
   const origem = itemTocandoAgora._origem;
-
-  if (origem === 'autodj') {
-    proximaMusica();
-  } else if (origem === 'aovivo') {
-    proximaMusicaAoVivo();
-  } else {
+  if (origem === 'autodj') proximaMusica();
+  else if (origem === 'aovivo') proximaMusicaAoVivo();
+  else {
     itemTocandoAgora.classList.remove('tocando');
     itemTocandoAgora = null;
     estado.musicaTocando = false;
   }
 });
 
-/* ==========================================================
-   ENVIA METADADOS
-   ========================================================== */
 function enviarMeta(titulo) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'meta',
-      title: titulo,
-      live: true,
-    }));
+    ws.send(JSON.stringify({ type: 'meta', title: titulo, live: true }));
   }
 }
 
@@ -854,7 +890,7 @@ async function entrarNoPainel(nome) {
   document.getElementById('nomeUsuarioTopo').textContent = nome.toLowerCase();
   conectarWS();
   await inicializarAudio();
-  atualizarListaUsuarios([nome + ' (locutor)']);
+  renderizarListaContatos();
 }
 
 /* ==========================================================
@@ -1075,7 +1111,180 @@ document.getElementById('sliderMidia').addEventListener('input', (e) => {
 });
 
 /* ==========================================================
-   CHAT
+   VISOR — contagem
+   ========================================================== */
+function atualizarVisorContagem(listeners) {
+  const n = (listeners !== undefined && listeners !== null) ? listeners : 0;
+  document.getElementById('visorCliques').textContent = String(n).padStart(2,'0');
+  document.getElementById('visorTotal').textContent = String(n).padStart(2,'0');
+}
+
+/* ==========================================================
+   VISOR — lista de nomes de ouvintes com scroll
+   ========================================================== */
+function atualizarListaOuvintes(nomes, total) {
+  const container = document.getElementById('visorOuvindo');
+  container.innerHTML = '';
+
+  if (!nomes || nomes.length === 0) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'ninguém ouvindo';
+    container.appendChild(vazio);
+  } else {
+    nomes.forEach(nome => {
+      const item = document.createElement('div');
+      item.className = 'ouvinteItem';
+      item.textContent = nome;
+      container.appendChild(item);
+    });
+  }
+
+  atualizarVisorContagem(total !== undefined ? total : nomes.length);
+}
+
+/* ==========================================================
+   CHAT ESTILO WHATSAPP
+   ========================================================== */
+const usuariosChat = new Set();          // nomes únicos de contatos
+const naoLidas = new Map();              // nome -> contador
+
+function registrarMensagem(msg, silencioso = false) {
+  const contato = msg.role === 'listener' ? msg.user : (msg.target || 'locutor');
+
+  if (!conversas.has(contato)) conversas.set(contato, []);
+  conversas.get(contato).push(msg);
+
+  // Adiciona contato na lista (se for ouvinte)
+  if (msg.role === 'listener' && msg.user) {
+    usuariosChat.add(msg.user);
+  }
+
+  // Incrementa não lidas se o chat não estiver aberto OU não for o contato ativo
+  if (!silencioso && msg.role === 'listener') {
+    const chatAberto = modalChat.classList.contains('ativo');
+    const ehContatoAtivo = estado.contatoAtivo === contato;
+    if (!chatAberto || !ehContatoAtivo) {
+      naoLidas.set(contato, (naoLidas.get(contato) || 0) + 1);
+      // Badge global
+      const badge = document.getElementById('badgeMensagens');
+      const atual = parseInt(badge.textContent) || 0;
+      badge.textContent = atual + 1;
+      badge.style.display = 'flex';
+    }
+  }
+
+  renderizarListaContatos();
+
+  // Se o contato ativo for esse, renderiza as mensagens
+  if (estado.contatoAtivo === contato) {
+    renderizarMensagens();
+  }
+}
+
+function renderizarListaContatos() {
+  const container = document.getElementById('chatUsuarios');
+  container.innerHTML = '';
+
+  // Item "Todos"
+  const todos = document.createElement('div');
+  todos.className = 'user' + (estado.contatoAtivo === '__todos__' ? ' ativo' : '');
+  todos.innerHTML = `<span class="nome">📢 Todos</span>`;
+  todos.addEventListener('click', () => selecionarContato('__todos__'));
+  container.appendChild(todos);
+
+  // Contatos (ouvintes)
+  const lista = Array.from(usuariosChat).sort();
+  lista.forEach(nome => {
+    const div = document.createElement('div');
+    div.className = 'user' + (estado.contatoAtivo === nome ? ' ativo' : '');
+    const naoLidasCount = naoLidas.get(nome) || 0;
+    div.innerHTML = `
+      <span class="dot"></span>
+      <span class="nome">${nome}</span>
+      ${naoLidasCount > 0 ? `<span class="contador">${naoLidasCount}</span>` : ''}
+    `;
+    div.addEventListener('click', () => selecionarContato(nome));
+    container.appendChild(div);
+  });
+}
+
+function selecionarContato(nome) {
+  estado.contatoAtivo = nome;
+
+  // Zera não lidas do contato
+  if (nome !== '__todos__') {
+    naoLidas.set(nome, 0);
+  }
+
+  // Atualiza o badge global (soma de todas as não lidas)
+  let total = 0;
+  for (const v of naoLidas.values()) total += v;
+  const badge = document.getElementById('badgeMensagens');
+  if (total > 0) {
+    badge.textContent = total;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  renderizarListaContatos();
+  renderizarMensagens();
+  document.getElementById('inputChat').focus();
+}
+
+function renderizarMensagens() {
+  const container = document.getElementById('chatMensagens');
+  container.innerHTML = '';
+
+  if (!estado.contatoAtivo) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'Selecione um contato para ver as mensagens';
+    container.appendChild(vazio);
+    return;
+  }
+
+  let mensagens = [];
+
+  if (estado.contatoAtivo === '__todos__') {
+    // Todas as mensagens, ordenadas por tempo
+    for (const lista of conversas.values()) mensagens = mensagens.concat(lista);
+    mensagens.sort((a, b) => (a.time || 0) - (b.time || 0));
+  } else {
+    mensagens = conversas.get(estado.contatoAtivo) || [];
+  }
+
+  if (mensagens.length === 0) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'Nenhuma mensagem ainda';
+    container.appendChild(vazio);
+    return;
+  }
+
+  mensagens.forEach(msg => {
+    const div = document.createElement('div');
+    // Enviada pelo locutor? → 'enviada'. Recebida? → 'recebida'
+    const ehEnviada = msg.role === 'broadcaster';
+    div.className = 'msg ' + (ehEnviada ? 'enviada' : 'recebida');
+    if (msg.target) div.classList.add('privada');
+
+    const hora = new Date(msg.time || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    div.innerHTML = `
+      <span class="autor">${ehEnviada ? 'você' : msg.user}${msg.target ? ' 🔒' : ''}</span>
+      ${msg.text}
+      <span class="hora">${hora}</span>
+    `;
+    container.appendChild(div);
+  });
+
+  container.scrollTop = container.scrollHeight;
+}
+
+/* ==========================================================
+   ENVIO DE MENSAGEM
    ========================================================== */
 document.getElementById('btnEnviarChat').addEventListener('click', enviarMsgChat);
 document.getElementById('inputChat').addEventListener('keydown', (e) => {
@@ -1086,60 +1295,46 @@ function enviarMsgChat() {
   const input = document.getElementById('inputChat');
   const texto = input.value.trim();
   if (!texto) return;
+
+  if (!estado.contatoAtivo) {
+    alert('Selecione um contato primeiro!');
+    return;
+  }
+
+  const target = estado.contatoAtivo === '__todos__' ? null : estado.contatoAtivo;
+
+  // Envia para o servidor
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'chat', user: estado.usuario, text: texto }));
+    ws.send(JSON.stringify({
+      type: 'chat',
+      user: estado.usuario,
+      text: texto,
+      target,
+    }));
   }
-  adicionarMsgChat({ user: estado.usuario, text: texto, role: 'broadcaster' });
+
+  // Registra localmente (sem duplicar)
+  const msg = {
+    type: 'chat',
+    user: estado.usuario,
+    text: texto,
+    role: 'broadcaster',
+    target,
+    time: Date.now(),
+  };
+
+  const contato = target || 'locutor';
+  if (!conversas.has(contato)) conversas.set(contato, []);
+  conversas.get(contato).push(msg);
+
   input.value = '';
-}
-
-function receberChat(msg) {
-  adicionarMsgChat(msg);
-  if (!modalChat.classList.contains('ativo')) {
-    const badge = document.getElementById('badgeMensagens');
-    const atual = parseInt(badge.textContent) || 0;
-    badge.textContent = atual + 1;
-    badge.style.display = 'flex';
-  }
-}
-
-function adicionarMsgChat({ user, text, role }) {
-  const div = document.createElement('div');
-  div.className = 'msg ' + (role === 'broadcaster' ? 'eu' : 'ouvinte');
-  div.textContent = `${user}: ${text}`;
-  const container = document.getElementById('chatMensagens');
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-}
-
-const usuariosChat = new Set();
-function adicionarUsuarioChat(nome) {
-  if (!nome) return;
-  usuariosChat.add(nome);
-  atualizarListaUsuarios([estado.usuario + ' (locutor)', ...usuariosChat]);
-}
-
-function atualizarListaUsuarios(lista) {
-  const container = document.getElementById('chatUsuarios');
-  container.innerHTML = '';
-  lista.forEach(nome => {
-    const div = document.createElement('div');
-    div.className = 'user';
-    div.textContent = nome;
-    container.appendChild(div);
-  });
+  renderizarMensagens();
+  input.focus();
 }
 
 /* ==========================================================
-   VISOR
+   FIM
    ========================================================== */
-function atualizarVisor(listeners) {
-  const n = (listeners !== undefined && listeners !== null) ? listeners : estado.ouvintes.length;
-  document.getElementById('visorCliques').textContent = String(n).padStart(2,'0');
-  document.getElementById('visorTotal').textContent = String(n).padStart(2,'0');
-  document.getElementById('visorOuvindo').textContent = n > 0 ? 'ouvintes' : '—';
-}
-atualizarVisor();
 </script>
 </body>
 </html>
