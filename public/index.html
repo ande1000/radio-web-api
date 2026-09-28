@@ -408,7 +408,7 @@ function mostrarTela(tela) {
 }
 
 /* ==========================================================
-   WAKE LOCK — mantém a tela acesa enquanto toca
+   WAKE LOCK
    ========================================================== */
 async function ativarWakeLock() {
   try {
@@ -450,12 +450,18 @@ document.addEventListener('visibilitychange', async () => {
    WEBSOCKET
    ========================================================== */
 function conectarWebSocket() {
+  // 🔴 NÃO conecta se não tiver nome de usuário
+  if (!estado.usuario || estado.usuario.trim() === '') {
+    console.log('⏸ Sem usuário definido — WS não conectado');
+    return;
+  }
+
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
 
   try {
-    const nomeUsuario = encodeURIComponent(estado.usuario || 'anônimo');
+    const nomeUsuario = encodeURIComponent(estado.usuario.trim());
     ws = new WebSocket(`${API_WS}?role=listener&user=${nomeUsuario}`);
     ws.binaryType = 'arraybuffer';
 
@@ -476,7 +482,6 @@ function conectarWebSocket() {
             atualizarMediaSession(msg.title);
           }
           if (msg.type === 'chat') {
-            // Só mostra se for mensagem do locutor (broadcaster) pra mim
             const ehMinha = msg.user === estado.usuario;
             const ehDoLocutor = msg.role === 'broadcaster';
             if (ehDoLocutor && !ehMinha) {
@@ -598,7 +603,6 @@ btnPlay.addEventListener('click', async () => {
     console.log('▶ Tocando');
     await ativarWakeLock();
     registrarMediaSession();
-    // Garante que o WS está conectado (com o nome do usuário)
     conectarWebSocket();
   } else {
     console.log('⏸ Pausado');
