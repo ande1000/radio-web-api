@@ -19,13 +19,11 @@
   user-select: none;
 }
 input { user-select: text; -webkit-user-select: text; }
-
 html, body {
   height: 100%; width: 100%;
   background: #1a1a1a; overflow: hidden;
   overscroll-behavior: none;
 }
-
 #moldura {
   position: fixed;
   top: 50%; left: 50%;
@@ -38,7 +36,6 @@ html, body {
   box-shadow: 0 0 0 6px #2a2a2a, 0 0 0 8px #111, 0 30px 80px rgba(0,0,0,0.7);
   display: flex; flex-direction: column;
 }
-
 @media (max-width: 500px) {
   #moldura {
     top: 0; left: 0; transform: none;
@@ -47,18 +44,15 @@ html, body {
   }
   body { background: #000; }
 }
-
 #app {
   flex: 1; position: relative; overflow: hidden;
   background: #000; color: #fff;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
-
 .tela { position: absolute; inset: 0; display: none; flex-direction: column; }
 .tela.ativa { display: flex; }
 
-/* LOGIN */
 #telaLogin {
   background: #000;
   align-items: center; justify-content: center;
@@ -84,7 +78,6 @@ html, body {
 .btnCriar:active { transform: translateY(3px); box-shadow: 0 1px 0 #0a7a22; }
 .btnCriar .seta { font-size: 24px; color: #fff; }
 
-/* PRINCIPAL */
 #telaPrincipal {
   background: #7a7a7a;
   align-items: center; justify-content: space-between;
@@ -142,7 +135,6 @@ html, body {
   margin-bottom: 10px;
 }
 
-/* CHAT */
 #popupChat {
   position: absolute;
   bottom: 16px; right: 16px;
@@ -220,7 +212,6 @@ html, body {
 }
 .btnEnviar:active { background: #d97f97; }
 
-/* MODAL SAIR */
 #modalSair {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.65);
@@ -254,14 +245,12 @@ html, body {
   padding: 10px 22px; border-radius: 20px;
   cursor: pointer;
 }
-#modalSair .btnNao:active { transform: scale(0.95); }
 #modalSair .btnSim {
   background: #7a2a5a; color: #fff; border: none;
   font-size: 14px; font-weight: 900;
   padding: 10px 22px; border-radius: 20px;
   cursor: pointer;
 }
-#modalSair .btnSim:active { transform: scale(0.95); }
 
 .statusConexao {
   position: absolute; top: 8px; left: 8px;
@@ -363,9 +352,6 @@ html, body {
   </div>
 </div>
 
-<!-- ÁUDIO ESCONDIDO PARA MEDIA SESSION -->
-<audio id="audioOculto" preload="auto" loop></audio>
-
 <script>
 /* ==========================================================
    CONFIG
@@ -381,6 +367,10 @@ const estado = {
   conectado: false,
   aoVivo: false,
 };
+
+let ws = null;
+let wakeLock = null;
+let tentativasReconexao = 0;
 
 const telaLogin     = document.getElementById('telaLogin');
 const telaPrincipal = document.getElementById('telaPrincipal');
@@ -418,17 +408,63 @@ function mostrarTela(tela) {
 }
 
 /* ==========================================================
+   WAKE LOCK — mantém a tela acesa enquanto toca
+   ========================================================== */
+async function ativarWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('💡 Wake Lock ativado');
+      wakeLock.addEventListener('release', () => {
+        console.log('💡 Wake Lock liberado');
+      });
+    }
+  } catch (err) {
+    console.warn('Wake Lock erro:', err.message);
+  }
+}
+
+async function desativarWakeLock() {
+  if (wakeLock) {
+    try { await wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+    console.log('💡 Wake Lock desativado');
+  }
+}
+
+// Reativa o wake lock quando a tela volta
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible') {
+    if (estado.tocando && !wakeLock) {
+      await ativarWakeLock();
+    }
+    // Resume o AudioContext se estiver suspenso
+    if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    // Força reconexão do WS se caiu
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      conectarWebSocket();
+    }
+  }
+});
+
+/* ==========================================================
    WEBSOCKET
    ========================================================== */
-let ws = null;
-
 function conectarWebSocket() {
+  // Se já tem uma conexão aberta, não faz nada
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   try {
     ws = new WebSocket(`${API_WS}?role=listener`);
     ws.binaryType = 'arraybuffer';
 
     ws.addEventListener('open', () => {
       estado.conectado = true;
+      tentativasReconexao = 0;
       atualizarStatusConexao(true);
       console.log('✅ Conectado');
     });
@@ -455,13 +491,18 @@ function conectarWebSocket() {
       estado.conectado = false;
       atualizarStatusConexao(false);
       atualizarStatusAoVivo(false);
-      setTimeout(conectarWebSocket, 3000);
+
+      // Reconexão rápida: 500ms, 1s, 2s, 4s (máx 5s)
+      tentativasReconexao++;
+      const delay = Math.min(500 * Math.pow(2, tentativasReconexao - 1), 5000);
+      console.log(`🔄 Reconectando em ${delay}ms...`);
+      setTimeout(conectarWebSocket, delay);
     });
 
     ws.addEventListener('error', (err) => console.warn('WS erro:', err.message));
   } catch (err) {
     console.warn('Erro conexão:', err.message);
-    setTimeout(conectarWebSocket, 3000);
+    setTimeout(conectarWebSocket, 1000);
   }
 }
 
@@ -524,6 +565,7 @@ btnConfirmarSair.addEventListener('click', () => {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
   }
+  desativarWakeLock();
   popupChat.classList.remove('ativo');
   desconectarWebSocket();
   localStorage.removeItem('radioUsuario');
@@ -540,7 +582,7 @@ modalSair.addEventListener('click', (e) => {
 /* ==========================================================
    PLAY
    ========================================================== */
-btnPlay.addEventListener('click', () => {
+btnPlay.addEventListener('click', async () => {
   estado.tocando = !estado.tocando;
   btnPlay.classList.toggle('tocando', estado.tocando);
 
@@ -549,9 +591,11 @@ btnPlay.addEventListener('click', () => {
 
   if (estado.tocando) {
     console.log('▶ Tocando');
+    await ativarWakeLock();
     registrarMediaSession();
   } else {
     console.log('⏸ Pausado');
+    await desativarWakeLock();
     proximoInicio = audioCtx ? audioCtx.currentTime : 0;
   }
 });
@@ -567,7 +611,7 @@ function atualizarNomeMusica(titulo) {
 }
 
 /* ==========================================================
-   MEDIA SESSION — mantém áudio vivo em background
+   MEDIA SESSION
    ========================================================== */
 function registrarMediaSession() {
   if (!('mediaSession' in navigator)) return;
@@ -583,6 +627,7 @@ function registrarMediaSession() {
     btnPlay.classList.add('tocando');
     initAudio();
     if (audioCtx.state === 'suspended') audioCtx.resume();
+    ativarWakeLock();
   });
 
   navigator.mediaSession.setActionHandler('pause', () => {
@@ -673,9 +718,15 @@ function tocarChunkAudio(arrayBuffer) {
   source.connect(audioCtx.destination);
 
   const agora = audioCtx.currentTime;
-  // Ajuste de sincronização (evita atraso acumulado)
-  if (proximoInicio < agora - 0.3) proximoInicio = agora;
-  else if (proximoInicio > agora + 1.5) proximoInicio = agora + 0.1;
+  // Sincronização: se atrasou mais de 0.3s, pula pra frente
+  if (proximoInicio < agora - 0.3) {
+    console.log('⚠️ Sincronizando áudio (estava atrasado)');
+    proximoInicio = agora;
+  }
+  // Se adiantou muito (mais de 1.5s), atrasa
+  else if (proximoInicio > agora + 1.5) {
+    proximoInicio = agora + 0.05;
+  }
 
   const inicio = Math.max(agora, proximoInicio);
   source.start(inicio);
@@ -683,30 +734,11 @@ function tocarChunkAudio(arrayBuffer) {
 }
 
 /* ==========================================================
-   DESBLOQUEIO DE ÁUDIO EM BACKGROUND
-   Tenta manter o AudioContext vivo quando tela apaga
-   ========================================================== */
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-  }
-});
-
-// Tenta reativar o audio context se ficar suspenso
-setInterval(() => {
-  if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-}, 2000);
-
-/* ==========================================================
    SERVICE WORKER — PWA
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v3';
+    const CACHE = 'radio-web-v4';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
@@ -721,6 +753,23 @@ if ('serviceWorker' in navigator) {
   const blob = new Blob([swCode], { type: 'application/javascript' });
   navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
 }
+
+/* ==========================================================
+   MONITOR DE ÁUDIO — tenta manter contexto ativo
+   ========================================================== */
+setInterval(() => {
+  if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
+    console.log('🔧 Tentando retomar AudioContext...');
+    audioCtx.resume();
+  }
+  if (estado.tocando && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    console.log('🔧 WS caiu — reconectando...');
+    conectarWebSocket();
+  }
+  if (estado.tocando && !wakeLock && 'wakeLock' in navigator) {
+    ativarWakeLock();
+  }
+}, 3000);
 </script>
 </body>
 </html>
