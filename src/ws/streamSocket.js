@@ -16,7 +16,7 @@ export function attachStreamSocket(server) {
 
     const role = url.searchParams.get('role');
     const token = url.searchParams.get('token');
-    const user = url.searchParams.get('user') || 'anônimo';
+    const user = url.searchParams.get('user') || '';
 
     if (role === 'broadcaster' && token !== config.streamToken) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -98,8 +98,25 @@ export function attachStreamSocket(server) {
 
     // ============ LISTENER (app ouvinte) ============
     if (ws.role === 'listener') {
-      streamManager.addListener(ws.id, ws, ws.user);
-      console.log(`👤 Ouvinte conectado: ${ws.user} (total: ${streamManager.getListenerCount()})`);
+      // 🔴 Ignora listeners sem nome válido
+      const nomeLimpo = (ws.user || '').trim();
+      const nomeInvalido =
+        !nomeLimpo ||
+        nomeLimpo.toLowerCase() === 'anônimo' ||
+        nomeLimpo.toLowerCase() === 'anonimo' ||
+        nomeLimpo.toLowerCase() === 'anônima' ||
+        nomeLimpo.toLowerCase() === 'anonima';
+
+      if (nomeInvalido) {
+        console.log('👤 Listener sem nome — ignorado');
+        ws.send(JSON.stringify({ type: 'error', message: 'Nome de usuário obrigatório' }));
+        // Aceita apenas ping/pong, mas não registra nem processa chat
+        ws.on('message', () => {});
+        return;
+      }
+
+      streamManager.addListener(ws.id, ws, nomeLimpo);
+      console.log(`👤 Ouvinte conectado: ${nomeLimpo} (total: ${streamManager.getListenerCount()})`);
 
       ws.send(JSON.stringify({ type: 'meta', ...streamManager.getStatus() }));
       streamManager.enviarHistoricoChat(ws);
@@ -110,7 +127,7 @@ export function attachStreamSocket(server) {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'chat') {
             streamManager.broadcastChat({
-              user: ws.user || msg.user || 'ouvinte',
+              user: nomeLimpo,
               text: msg.text,
               role: 'listener',
             });
@@ -122,7 +139,7 @@ export function attachStreamSocket(server) {
 
       ws.on('close', () => {
         streamManager.removeListener(ws.id);
-        console.log(`👤 Ouvinte saiu: ${ws.user} (total: ${streamManager.getListenerCount()})`);
+        console.log(`👤 Ouvinte saiu: ${nomeLimpo} (total: ${streamManager.getListenerCount()})`);
         streamManager.notifyListenersMeta();
       });
     }
