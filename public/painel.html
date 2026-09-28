@@ -8,7 +8,6 @@
   * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif; }
   body { background: #000; color: #fff; min-height: 100vh; overflow-x: hidden; }
 
-  /* ========== LOGIN ========== */
   #telaLogin {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     min-height: 100vh; background: #000; gap: 40px;
@@ -29,7 +28,6 @@
   #telaLogin button:hover { background: #27d94b; transform: scale(1.03); }
   #telaLogin button::after { content: "➜"; font-size: 30px; color: #fff; }
 
-  /* ========== PAINEL ========== */
   #telaPainel { display: none; height: 100vh; padding: 10px; background: #000; flex-direction: column; gap: 8px; overflow: hidden; }
   #telaPainel.ativo { display: flex; }
 
@@ -283,7 +281,6 @@
   }
   .modalSair .btnNao:hover { background: #333; }
 
-  /* Indicador de conexão */
   .statusConexao {
     position: fixed; top: 8px; right: 8px; z-index: 9999;
     padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold;
@@ -307,7 +304,7 @@
 
   <div class="topo">
     <div class="esquerda">
-      <button class="iconeBtn" id="btnSairConta" title="Sair da conta" aria-label="Sair da conta">
+      <button class="iconeBtn" id="btnSairConta" title="Sair da conta">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M16 17L21 12L16 7" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -450,38 +447,44 @@
 
 <script>
 /* ==========================================================
-   CONFIG — API
+   CONFIG
    ========================================================== */
-const API_HTTP = 'https://radio-web-api.onrender.com';
-const API_WS   = 'wss://radio-web-api.onrender.com/ws/stream';
+const API_WS = 'wss://radio-web-api.onrender.com/ws/stream';
 const STREAM_TOKEN = 'radio-anderson-2026-x7k9p2m4n8q1';
 
 /* ==========================================================
-   ESTADO GLOBAL
+   ESTADO
    ========================================================== */
 const estado = {
   usuario: '',
-  aoVivo: false,
+  aoVivo: false,           // Transmissão ativa?
   reproduzirTodas: false,
   ouvintes: [],
   conectado: false,
+  musicaTocando: false,    // Player tocando localmente?
 };
 
 let ws = null;
-let micStream = null;
+
+/* ==========================================================
+   ÁUDIO — contexto persistente
+   ========================================================== */
 let audioCtx = null;
-let mixerNode = null;
+let mixerNode = null;        // Mixer do que vai pra transmissão
 let micSource = null;
 let playerSource = null;
 let processorNode = null;
 let micGain = null;
 let mediaGain = null;
+let monitorGain = null;      // Saída pras caixas de som do PC (só música)
+let micStream = null;
 
 /* ==========================================================
    PLAYER + ANALISADOR
    ========================================================== */
 const player = new Audio();
 player.crossOrigin = 'anonymous';
+player.loop = false;
 let itemTocandoAgora = null;
 const filaAutoDj = [];
 
@@ -496,7 +499,7 @@ const ENERGIA_MIN = 25;
 let ledAtual = -1;
 
 /* ==========================================================
-   WEBSOCKET — Conexão com a API
+   WEBSOCKET
    ========================================================== */
 function conectarWS() {
   const url = `${API_WS}?role=broadcaster&token=${encodeURIComponent(STREAM_TOKEN)}`;
@@ -513,39 +516,22 @@ function conectarWS() {
     try {
       const msg = JSON.parse(event.data);
 
-      if (msg.type === 'ready') {
-        console.log('🎙️ Painel pronto pra transmitir');
+      if (msg.type === 'ready') console.log('🎙️ Painel pronto');
+      if (msg.type === 'meta' && msg.listeners !== undefined) {
+        document.getElementById('visorTotal').textContent = String(msg.listeners).padStart(2,'0');
       }
-
-      if (msg.type === 'meta') {
-        // Atualiza contador de ouvintes no visor
-        if (msg.listeners !== undefined) {
-          document.getElementById('visorTotal').textContent = String(msg.listeners).padStart(2,'0');
-        }
-      }
-
-      if (msg.type === 'chat') {
-        receberChat(msg);
-      }
-
-      if (msg.type === 'error') {
-        alert('Erro: ' + msg.message);
-      }
-    } catch (e) {
-      console.warn('Mensagem inválida:', e);
-    }
+      if (msg.type === 'chat') receberChat(msg);
+      if (msg.type === 'error') alert('Erro: ' + msg.message);
+    } catch (e) { console.warn('Mensagem inválida:', e); }
   });
 
   ws.addEventListener('close', () => {
     estado.conectado = false;
     atualizarStatusConexao(false);
-    console.log('❌ Desconectado. Reconectando em 3s...');
     setTimeout(conectarWS, 3000);
   });
 
-  ws.addEventListener('error', (err) => {
-    console.warn('WS erro:', err.message);
-  });
+  ws.addEventListener('error', (err) => console.warn('WS erro:', err.message));
 }
 
 function atualizarStatusConexao(online) {
@@ -555,80 +541,91 @@ function atualizarStatusConexao(online) {
 }
 
 /* ==========================================================
-   ÁUDIO — Captura de microfone + música, mixer e envio
+   ÁUDIO — Inicializar contexto (uma vez, na entrada)
    ========================================================== */
-async function iniciarTransmissao() {
+async function inicializarAudio() {
+  if (audioCtx) return; // já criado
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+
+  // Mixer principal (o que vai pra transmissão: mic + música)
+  mixerNode = audioCtx.createGain();
+  mixerNode.gain.value = 1;
+
+  // Mic
+  micGain = audioCtx.createGain();
+  micGain.gain.value = document.getElementById('sliderMic').value / 100;
+
+  // Música
+  mediaGain = audioCtx.createGain();
+  mediaGain.gain.value = document.getElementById('sliderMidia').value / 100;
+
+  // Fonte da música (player)
+  playerSource = audioCtx.createMediaElementSource(player);
+  playerSource.connect(mediaGain);
+
+  // Música vai pro mixer (transmissão) E pras caixas do PC (monitor)
+  mediaGain.connect(mixerNode);
+
+  // Monitor: só a música vai pras caixas do PC
+  monitorGain = audioCtx.createGain();
+  monitorGain.gain.value = 1;
+  mediaGain.connect(monitorGain);
+  monitorGain.connect(audioCtx.destination);
+
+  // Analisador (LEDs) ligado no mixer
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.55;
+  mixerNode.connect(analyser);
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+  // Processor pra enviar via WS (só quando AO VIVO estiver ligado)
+  processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  processorNode.onaudioprocess = (e) => {
+    if (!estado.aoVivo || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const input = e.inputBuffer.getChannelData(0);
+    const int16 = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    ws.send(int16.buffer);
+  };
+  mixerNode.connect(processorNode);
+  // Conecta num gain "mudo" pra não duplicar som no PC
+  const silencio = audioCtx.createGain();
+  silencio.gain.value = 0;
+  processorNode.connect(silencio);
+  silencio.connect(audioCtx.destination);
+
+  loopAnalise();
+  console.log('🎧 Áudio inicializado');
+}
+
+/* ==========================================================
+   MIC — pedir permissão e conectar ao mixer
+   ========================================================== */
+async function ligarMicrofone() {
+  if (micSource) return; // já ligado
+
   try {
-    // 1. Pega o microfone
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
-
-    // 2. Cria o contexto de áudio
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    await audioCtx.resume();
-
-    // 3. Cria o mixer (GainNode principal)
-    mixerNode = audioCtx.createGain();
-
-    // 4. Fonte do microfone
     micSource = audioCtx.createMediaStreamSource(micStream);
-    micGain = audioCtx.createGain();
-    micGain.gain.value = document.getElementById('sliderMic').value / 100;
-    micSource.connect(micGain).connect(mixerNode);
-
-    // 5. Fonte da música (player <audio>)
-    playerSource = audioCtx.createMediaElementSource(player);
-    mediaGain = audioCtx.createGain();
-    mediaGain.gain.value = document.getElementById('sliderMidia').value / 100;
-    playerSource.connect(mediaGain).connect(mixerNode);
-
-    // 6. Analisador (para os LEDs)
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.55;
-    mixerNode.connect(analyser);
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-    // 7. Processor pra capturar o áudio e enviar via WS
-    // ScriptProcessorNode (obsoleto mas funciona em todos navegadores)
-    processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
-
-    processorNode.onaudioprocess = (e) => {
-      if (!estado.aoVivo || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-      const input = e.inputBuffer.getChannelData(0);
-
-      // Converte Float32 → Int16 (PCM 16-bit)
-      const int16 = new Int16Array(input.length);
-      for (let i = 0; i < input.length; i++) {
-        const s = Math.max(-1, Math.min(1, input[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-
-      // Envia como binário
-      ws.send(int16.buffer);
-    };
-
-    mixerNode.connect(processorNode);
-    processorNode.connect(audioCtx.destination);
-
-    // 8. Inicia o loop de análise (LEDs)
-    loopAnalise();
-
-    console.log('🎙️ Transmissão iniciada');
+    micSource.connect(micGain);
+    micGain.connect(mixerNode);
+    console.log('🎤 Microfone ligado');
   } catch (err) {
-    console.error('Erro ao iniciar transmissão:', err);
     alert('Não foi possível acessar o microfone: ' + err.message);
     throw err;
   }
 }
 
-function pararTransmissao() {
-  if (processorNode) {
-    processorNode.disconnect();
-    processorNode = null;
-  }
+function desligarMicrofone() {
   if (micSource) {
     micSource.disconnect();
     micSource = null;
@@ -637,20 +634,42 @@ function pararTransmissao() {
     micStream.getTracks().forEach(t => t.stop());
     micStream = null;
   }
-  if (playerSource) {
-    playerSource.disconnect();
-    playerSource = null;
-  }
-  if (audioCtx) {
-    audioCtx.close();
-    audioCtx = null;
-  }
-  apagarTodasLeds();
-  console.log('🎙️ Transmissão parada');
+  console.log('🎤 Microfone desligado');
 }
 
 /* ==========================================================
-   LEDs — Analisador de batida
+   AO VIVO — Só liga/desliga a transmissão
+   (AutoDJ continua tocando independente)
+   ========================================================== */
+const btnAoVivo = document.getElementById('btnAoVivo');
+btnAoVivo.addEventListener('click', async () => {
+  if (!audioCtx) await inicializarAudio();
+
+  if (!estado.aoVivo) {
+    try {
+      await ligarMicrofone();
+      estado.aoVivo = true;
+      btnAoVivo.classList.add('ligado');
+      btnAoVivo.textContent = 'NO AR';
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'meta', live: true }));
+      }
+    } catch (err) {
+      console.warn('Erro ao entrar ao vivo:', err.message);
+    }
+  } else {
+    estado.aoVivo = false;
+    desligarMicrofone();
+    btnAoVivo.classList.remove('ligado');
+    btnAoVivo.textContent = 'AO VIVO';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'meta', live: false }));
+    }
+  }
+});
+
+/* ==========================================================
+   LEDs
    ========================================================== */
 const leds = document.querySelectorAll('#painelLuzes .lamp');
 const barraBranca = document.getElementById('barraBranca');
@@ -684,7 +703,6 @@ function loopAnalise() {
   if (historicoEnergia.length > HISTORICO) historicoEnergia.shift();
 
   const media = historicoEnergia.reduce((a, b) => a + b, 0) / historicoEnergia.length;
-
   const agora = performance.now();
   const ehBatida = (energia > media + MARGEM) && (energia > ENERGIA_MIN);
 
@@ -695,7 +713,7 @@ function loopAnalise() {
 }
 
 /* ==========================================================
-   PLAYER — Tocar música local
+   PLAYER
    ========================================================== */
 function tocarItemDaFila(index) {
   if (index < 0 || index >= filaAutoDj.length) return;
@@ -710,13 +728,10 @@ function tocarItemDaFila(index) {
   entrada.item.classList.add('tocando');
   itemTocandoAgora = entrada.item;
   itemTocandoAgora._indice = index;
+  estado.musicaTocando = true;
 
-  // Envia metadados pro servidor
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'meta',
-      title: entrada.arquivo.name,
-    }));
+    ws.send(JSON.stringify({ type: 'meta', title: entrada.arquivo.name }));
   }
 }
 
@@ -730,6 +745,7 @@ function proximaMusica() {
     else {
       if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
       itemTocandoAgora = null;
+      estado.musicaTocando = false;
       return;
     }
   }
@@ -744,6 +760,7 @@ player.addEventListener('ended', () => {
       itemTocandoAgora.classList.remove('tocando');
       itemTocandoAgora = null;
     }
+    estado.musicaTocando = false;
   }
 });
 
@@ -752,6 +769,7 @@ function tocarMusica(url, item, nomeArquivo) {
     player.pause();
     item.classList.remove('tocando');
     itemTocandoAgora = null;
+    estado.musicaTocando = false;
     return;
   }
   if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
@@ -762,6 +780,7 @@ function tocarMusica(url, item, nomeArquivo) {
   item.classList.add('tocando');
   itemTocandoAgora = item;
   itemTocandoAgora._indice = undefined;
+  estado.musicaTocando = true;
 
   if (ws && ws.readyState === WebSocket.OPEN && nomeArquivo) {
     ws.send(JSON.stringify({ type: 'meta', title: nomeArquivo }));
@@ -769,7 +788,7 @@ function tocarMusica(url, item, nomeArquivo) {
 }
 
 /* ==========================================================
-   TELA DE LOGIN
+   LOGIN
    ========================================================== */
 const telaLogin   = document.getElementById('telaLogin');
 const telaPainel  = document.getElementById('telaPainel');
@@ -790,12 +809,13 @@ inputLogin.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') btnCriar.click();
 });
 
-function entrarNoPainel(nome) {
+async function entrarNoPainel(nome) {
   estado.usuario = nome;
   telaLogin.style.display = 'none';
   telaPainel.classList.add('ativo');
   document.getElementById('nomeUsuarioTopo').textContent = nome.toLowerCase();
   conectarWS();
+  await inicializarAudio();
 }
 
 /* ==========================================================
@@ -833,9 +853,10 @@ document.getElementById('btnCancelarSair').addEventListener('click', () => {
 });
 document.getElementById('btnConfirmarSair').addEventListener('click', () => {
   if (estado.aoVivo) {
-    pararTransmissao();
     estado.aoVivo = false;
-    document.getElementById('btnAoVivo').classList.remove('ligado');
+    desligarMicrofone();
+    btnAoVivo.classList.remove('ligado');
+    btnAoVivo.textContent = 'AO VIVO';
   }
   if (!player.paused) player.pause();
   if (ws) { ws.close(); ws = null; }
@@ -845,35 +866,6 @@ document.getElementById('btnConfirmarSair').addEventListener('click', () => {
   telaLogin.style.display = 'flex';
   inputLogin.value = '';
   inputLogin.focus();
-});
-
-/* ==========================================================
-   AO VIVO
-   ========================================================== */
-const btnAoVivo = document.getElementById('btnAoVivo');
-btnAoVivo.addEventListener('click', async () => {
-  if (!estado.aoVivo) {
-    try {
-      await iniciarTransmissao();
-      estado.aoVivo = true;
-      btnAoVivo.classList.add('ligado');
-      btnAoVivo.textContent = 'NO AR';
-      // Avisa o servidor que começou
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'meta', live: true }));
-      }
-    } catch (err) {
-      console.warn('Erro:', err.message);
-    }
-  } else {
-    pararTransmissao();
-    estado.aoVivo = false;
-    btnAoVivo.classList.remove('ligado');
-    btnAoVivo.textContent = 'AO VIVO';
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'meta', live: false }));
-    }
-  }
 });
 
 /* ==========================================================
@@ -944,6 +936,7 @@ function criarItemPlaylist(arquivo, tipo) {
           player.pause();
           item.classList.remove('tocando');
           itemTocandoAgora = null;
+          estado.musicaTocando = false;
         } else {
           tocarItemDaFila(idx);
         }
@@ -957,6 +950,7 @@ function criarItemPlaylist(arquivo, tipo) {
     if (itemTocandoAgora === item) {
       player.pause();
       itemTocandoAgora = null;
+      estado.musicaTocando = false;
     }
     URL.revokeObjectURL(url);
     if (tipo === 'autoDj') {
@@ -1006,7 +1000,9 @@ document.getElementById('btnAddMusicaAutoDj').addEventListener('click', () => {
 });
 
 const btnReproduzirTodas = document.getElementById('btnReproduzirTodas');
-btnReproduzirTodas.addEventListener('click', () => {
+btnReproduzirTodas.addEventListener('click', async () => {
+  if (!audioCtx) await inicializarAudio();
+
   estado.reproduzirTodas = !estado.reproduzirTodas;
   btnReproduzirTodas.classList.toggle('ligado', estado.reproduzirTodas);
 
@@ -1040,11 +1036,7 @@ function enviarMsgChat() {
   if (!texto) return;
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'chat',
-      user: estado.usuario,
-      text: texto,
-    }));
+    ws.send(JSON.stringify({ type: 'chat', user: estado.usuario, text: texto }));
   }
 
   adicionarMsgChat({ user: estado.usuario, text: texto, role: 'broadcaster' });
@@ -1053,8 +1045,6 @@ function enviarMsgChat() {
 
 function receberChat(msg) {
   adicionarMsgChat(msg);
-
-  // Badge de mensagens (se modal não estiver aberto)
   if (!modalChat.classList.contains('ativo') && msg.role !== 'broadcaster') {
     const badge = document.getElementById('badgeMensagens');
     const atual = parseInt(badge.textContent) || 0;
@@ -1073,7 +1063,7 @@ function adicionarMsgChat({ user, text, role }) {
 }
 
 /* ==========================================================
-   VISOR (atualiza com ouvintes reais via WS)
+   VISOR
    ========================================================== */
 function atualizarVisor() {
   document.getElementById('visorCliques').textContent = String(estado.ouvintes.length).padStart(2,'0');
