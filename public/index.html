@@ -19,11 +19,13 @@
   user-select: none;
 }
 input { user-select: text; -webkit-user-select: text; }
+
 html, body {
   height: 100%; width: 100%;
   background: #1a1a1a; overflow: hidden;
   overscroll-behavior: none;
 }
+
 #moldura {
   position: fixed;
   top: 50%; left: 50%;
@@ -36,6 +38,7 @@ html, body {
   box-shadow: 0 0 0 6px #2a2a2a, 0 0 0 8px #111, 0 30px 80px rgba(0,0,0,0.7);
   display: flex; flex-direction: column;
 }
+
 @media (max-width: 500px) {
   #moldura {
     top: 0; left: 0; transform: none;
@@ -44,15 +47,18 @@ html, body {
   }
   body { background: #000; }
 }
+
 #app {
   flex: 1; position: relative; overflow: hidden;
   background: #000; color: #fff;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
+
 .tela { position: absolute; inset: 0; display: none; flex-direction: column; }
 .tela.ativa { display: flex; }
 
+/* LOGIN */
 #telaLogin {
   background: #000;
   align-items: center; justify-content: center;
@@ -78,6 +84,7 @@ html, body {
 .btnCriar:active { transform: translateY(3px); box-shadow: 0 1px 0 #0a7a22; }
 .btnCriar .seta { font-size: 24px; color: #fff; }
 
+/* PRINCIPAL */
 #telaPrincipal {
   background: #7a7a7a;
   align-items: center; justify-content: space-between;
@@ -135,6 +142,7 @@ html, body {
   margin-bottom: 10px;
 }
 
+/* CHAT */
 #popupChat {
   position: absolute;
   bottom: 16px; right: 16px;
@@ -212,6 +220,7 @@ html, body {
 }
 .btnEnviar:active { background: #d97f97; }
 
+/* MODAL SAIR */
 #modalSair {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.65);
@@ -243,14 +252,14 @@ html, body {
   background: #f4a0b8; color: #000; border: none;
   font-size: 14px; font-weight: 900;
   padding: 10px 22px; border-radius: 20px;
-  cursor: pointer; transition: transform 0.1s;
+  cursor: pointer;
 }
 #modalSair .btnNao:active { transform: scale(0.95); }
 #modalSair .btnSim {
   background: #7a2a5a; color: #fff; border: none;
   font-size: 14px; font-weight: 900;
   padding: 10px 22px; border-radius: 20px;
-  cursor: pointer; transition: transform 0.1s;
+  cursor: pointer;
 }
 #modalSair .btnSim:active { transform: scale(0.95); }
 
@@ -354,9 +363,18 @@ html, body {
   </div>
 </div>
 
+<!-- ÁUDIO ESCONDIDO PARA MEDIA SESSION -->
+<audio id="audioOculto" preload="auto" loop></audio>
+
 <script>
+/* ==========================================================
+   CONFIG
+   ========================================================== */
 const API_WS = 'wss://radio-web-api.onrender.com/ws/stream';
 
+/* ==========================================================
+   ESTADO
+   ========================================================== */
 const estado = {
   usuario: '',
   tocando: false,
@@ -412,7 +430,7 @@ function conectarWebSocket() {
     ws.addEventListener('open', () => {
       estado.conectado = true;
       atualizarStatusConexao(true);
-      console.log('✅ Conectado à API');
+      console.log('✅ Conectado');
     });
 
     ws.addEventListener('message', (event) => {
@@ -442,7 +460,7 @@ function conectarWebSocket() {
 
     ws.addEventListener('error', (err) => console.warn('WS erro:', err.message));
   } catch (err) {
-    console.warn('Não foi possível conectar:', err.message);
+    console.warn('Erro conexão:', err.message);
     setTimeout(conectarWebSocket, 3000);
   }
 }
@@ -632,7 +650,7 @@ let proximoInicio = 0;
 function initAudio() {
   if (audioCtx) return;
   const AC = window.AudioContext || window.webkitAudioContext;
-  audioCtx = new AC();
+  audioCtx = new AC({ sampleRate: 48000, latencyHint: 'interactive' });
   proximoInicio = audioCtx.currentTime;
 }
 
@@ -655,18 +673,40 @@ function tocarChunkAudio(arrayBuffer) {
   source.connect(audioCtx.destination);
 
   const agora = audioCtx.currentTime;
-  if (proximoInicio < agora - 0.5) proximoInicio = agora;
+  // Ajuste de sincronização (evita atraso acumulado)
+  if (proximoInicio < agora - 0.3) proximoInicio = agora;
+  else if (proximoInicio > agora + 1.5) proximoInicio = agora + 0.1;
+
   const inicio = Math.max(agora, proximoInicio);
   source.start(inicio);
   proximoInicio = inicio + buffer.duration;
 }
 
 /* ==========================================================
+   DESBLOQUEIO DE ÁUDIO EM BACKGROUND
+   Tenta manter o AudioContext vivo quando tela apaga
+   ========================================================== */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+});
+
+// Tenta reativar o audio context se ficar suspenso
+setInterval(() => {
+  if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}, 2000);
+
+/* ==========================================================
    SERVICE WORKER — PWA
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v2';
+    const CACHE = 'radio-web-v3';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
