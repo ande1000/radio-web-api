@@ -16,6 +16,7 @@ export function attachStreamSocket(server) {
 
     const role = url.searchParams.get('role');
     const token = url.searchParams.get('token');
+    const user = url.searchParams.get('user') || 'anônimo';
 
     if (role === 'broadcaster' && token !== config.streamToken) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -25,13 +26,14 @@ export function attachStreamSocket(server) {
 
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.role = role;
+      ws.user = user;
       ws.id = randomUUID();
       ws.isAlive = true;
       wss.emit('connection', ws, req);
     });
   });
 
-  // ---------- Heartbeat: mantém WS vivo no Render ----------
+  // ---------- Heartbeat ----------
   const intervaloHeartbeat = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) return ws.terminate();
@@ -58,6 +60,8 @@ export function attachStreamSocket(server) {
       console.log('🎙️  Broadcaster conectado');
       ws.send(JSON.stringify({ type: 'ready', role: 'broadcaster' }));
       streamManager.notifyListenersMeta();
+      streamManager.enviarListaOuvintes();
+      streamManager.enviarHistoricoChat(ws);
 
       ws.on('message', (data, isBinary) => {
         if (isBinary) {
@@ -77,6 +81,7 @@ export function attachStreamSocket(server) {
               user: msg.user || 'locutor',
               text: msg.text,
               role: 'broadcaster',
+              target: msg.target || null,
             });
           }
         } catch (err) {
@@ -93,10 +98,11 @@ export function attachStreamSocket(server) {
 
     // ============ LISTENER (app ouvinte) ============
     if (ws.role === 'listener') {
-      streamManager.addListener(ws.id, ws);
-      console.log(`👤 Ouvinte conectado (total: ${streamManager.getListenerCount()})`);
+      streamManager.addListener(ws.id, ws, ws.user);
+      console.log(`👤 Ouvinte conectado: ${ws.user} (total: ${streamManager.getListenerCount()})`);
 
       ws.send(JSON.stringify({ type: 'meta', ...streamManager.getStatus() }));
+      streamManager.enviarHistoricoChat(ws);
 
       ws.on('message', (data, isBinary) => {
         if (isBinary) return;
@@ -104,7 +110,7 @@ export function attachStreamSocket(server) {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'chat') {
             streamManager.broadcastChat({
-              user: msg.user || 'ouvinte',
+              user: ws.user || msg.user || 'ouvinte',
               text: msg.text,
               role: 'listener',
             });
@@ -116,7 +122,7 @@ export function attachStreamSocket(server) {
 
       ws.on('close', () => {
         streamManager.removeListener(ws.id);
-        console.log(`👤 Ouvinte saiu (total: ${streamManager.getListenerCount()})`);
+        console.log(`👤 Ouvinte saiu: ${ws.user} (total: ${streamManager.getListenerCount()})`);
         streamManager.notifyListenersMeta();
       });
     }
