@@ -11,9 +11,6 @@
 <title>Radio Web</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Radio%20Web%22%2C%22short_name%22%3A%22Radio%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22orientation%22%3A%22portrait%22%2C%22background_color%22%3A%22%23000000%22%2C%22theme_color%22%3A%22%23000000%22%7D">
 <style>
-/* ==========================================================
-   RESET
-   ========================================================== */
 * {
   margin: 0; padding: 0; box-sizing: border-box;
   font-family: Arial, Helvetica, sans-serif;
@@ -22,16 +19,11 @@
   user-select: none;
 }
 input { user-select: text; -webkit-user-select: text; }
-
 html, body {
   height: 100%; width: 100%;
   background: #1a1a1a; overflow: hidden;
   overscroll-behavior: none;
 }
-
-/* ==========================================================
-   MOLDURA DO CELULAR (CENTRALIZADA NO PC)
-   ========================================================== */
 #moldura {
   position: fixed;
   top: 50%; left: 50%;
@@ -41,13 +33,9 @@ html, body {
   background: #000;
   border-radius: 32px;
   overflow: hidden;
-  box-shadow:
-    0 0 0 6px #2a2a2a,
-    0 0 0 8px #111,
-    0 30px 80px rgba(0,0,0,0.7);
+  box-shadow: 0 0 0 6px #2a2a2a, 0 0 0 8px #111, 0 30px 80px rgba(0,0,0,0.7);
   display: flex; flex-direction: column;
 }
-
 @media (max-width: 500px) {
   #moldura {
     top: 0; left: 0; transform: none;
@@ -56,32 +44,21 @@ html, body {
   }
   body { background: #000; }
 }
-
 #app {
   flex: 1; position: relative; overflow: hidden;
   background: #000; color: #fff;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
-
-/* ==========================================================
-   TELAS
-   ========================================================== */
 .tela { position: absolute; inset: 0; display: none; flex-direction: column; }
 .tela.ativa { display: flex; }
 
-/* ==========================================================
-   TELA 1 — LOGIN
-   ========================================================== */
 #telaLogin {
   background: #000;
   align-items: center; justify-content: center;
   gap: 50px; padding: 24px;
 }
-.tituloLogin {
-  font-size: 64px; font-weight: 900;
-  color: #e30613; letter-spacing: 2px;
-}
+.tituloLogin { font-size: 64px; font-weight: 900; color: #e30613; letter-spacing: 2px; }
 .campoLogin {
   width: 100%; max-width: 280px;
   padding: 14px 20px; border-radius: 40px; border: none;
@@ -101,18 +78,12 @@ html, body {
 .btnCriar:active { transform: translateY(3px); box-shadow: 0 1px 0 #0a7a22; }
 .btnCriar .seta { font-size: 24px; color: #fff; }
 
-/* ==========================================================
-   TELA 2 — PRINCIPAL
-   ========================================================== */
 #telaPrincipal {
   background: #7a7a7a;
   align-items: center; justify-content: space-between;
   padding: 16px; gap: 8px;
 }
-
-.topoPrincipal {
-  width: 100%; display: flex; justify-content: flex-end; gap: 8px;
-}
+.topoPrincipal { width: 100%; display: flex; justify-content: flex-end; gap: 8px; }
 .btnTopo {
   background: #d9d9d9; color: #000; border: none;
   font-size: 13px; font-weight: 900;
@@ -128,7 +99,6 @@ html, body {
   color: #1a1a1a; text-align: center;
   line-height: 1; margin-top: 20px;
 }
-
 .statusAoVivo {
   background: #d9d9d9; color: #000;
   font-size: 14px; font-weight: 900;
@@ -148,21 +118,13 @@ html, body {
   transition: transform 0.1s;
 }
 .btnPlay:active { transform: scale(0.95); }
-.btnPlay::before {
-  content: ""; position: absolute; inset: 10px;
-  border-radius: 50%; background: #e8a87c;
-}
-.iconePlay {
-  position: relative; z-index: 2;
-  font-size: 46px; color: #1a1a1a;
-  margin-left: 8px;
-}
+.btnPlay::before { content: ""; position: absolute; inset: 10px; border-radius: 50%; background: #e8a87c; }
+.iconePlay { position: relative; z-index: 2; font-size: 46px; color: #1a1a1a; margin-left: 8px; }
 .btnPlay.tocando .iconePlay { font-size: 0; }
 .btnPlay.tocando .iconePlay::before {
   content: "❚❚"; font-size: 36px;
   letter-spacing: 4px; margin-left: 0;
 }
-
 .nomeMusica {
   background: #d9d9d9; color: #1a1a1a;
   font-size: 14px; font-weight: 900;
@@ -173,9 +135,6 @@ html, body {
   margin-bottom: 10px;
 }
 
-/* ==========================================================
-   CHAT — POP-UP
-   ========================================================== */
 #popupChat {
   position: absolute;
   bottom: 16px; right: 16px;
@@ -187,12 +146,10 @@ html, body {
   animation: subirPopup 0.25s ease-out;
 }
 #popupChat.ativo { display: flex; }
-
 @keyframes subirPopup {
   from { transform: translateY(30px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
-
 @media (max-width: 360px) {
   #popupChat {
     width: calc(100% - 24px);
@@ -200,7 +157,6 @@ html, body {
     height: 60%;
   }
 }
-
 .topoChat {
   background: #4a4a4a; color: #fff;
   display: flex; align-items: center;
@@ -213,7 +169,6 @@ html, body {
   font-weight: 900; cursor: pointer; flex-shrink: 0;
 }
 .btnX:active { background: #a00410; }
-
 .tituloChat { font-size: 22px; font-weight: 900; line-height: 1; }
 .subtituloChat {
   display: flex; flex-direction: column;
@@ -221,7 +176,6 @@ html, body {
   color: #ccc; margin-left: auto;
   text-align: right; line-height: 1.3;
 }
-
 .areaMensagens {
   flex: 1; overflow-y: auto;
   padding: 10px; display: flex; flex-direction: column;
@@ -233,21 +187,9 @@ html, body {
   border-radius: 10px; font-size: 13px;
   word-wrap: break-word; line-height: 1.3;
 }
-.msg.outro {
-  background: #fff; color: #000;
-  align-self: flex-start;
-  border-bottom-left-radius: 2px;
-}
-.msg.eu {
-  background: #4a4a4a; color: #fff;
-  align-self: flex-end;
-  border-bottom-right-radius: 2px;
-}
-.msg .autor {
-  font-size: 10px; font-weight: 900;
-  display: block; margin-bottom: 2px;
-  opacity: 0.75;
-}
+.msg.outro { background: #fff; color: #000; align-self: flex-start; border-bottom-left-radius: 2px; }
+.msg.eu { background: #4a4a4a; color: #fff; align-self: flex-end; border-bottom-right-radius: 2px; }
+.msg .autor { font-size: 10px; font-weight: 900; display: block; margin-bottom: 2px; opacity: 0.75; }
 
 .rodapeChat {
   display: flex; align-items: center;
@@ -262,7 +204,6 @@ html, body {
   color: #000; min-width: 0;
 }
 .campoMensagem::placeholder { color: #555; font-weight: bold; }
-
 .btnEnviar {
   background: #f4a0b8; color: #000; border: none;
   width: 40px; height: 40px;
@@ -271,9 +212,6 @@ html, body {
 }
 .btnEnviar:active { background: #d97f97; }
 
-/* ==========================================================
-   MODAL DE SAIR
-   ========================================================== */
 #modalSair {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.65);
@@ -283,9 +221,7 @@ html, body {
   animation: fadeIn 0.2s ease-out;
 }
 #modalSair.ativo { display: flex; }
-
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
 #modalSair .caixa {
   background: #fff; color: #000;
   width: 100%; max-width: 300px;
@@ -318,7 +254,6 @@ html, body {
 }
 #modalSair .btnSim:active { transform: scale(0.95); }
 
-/* Status de conexão */
 .statusConexao {
   position: absolute; top: 8px; left: 8px;
   z-index: 9999; padding: 3px 8px;
@@ -336,7 +271,6 @@ html, body {
 
     <div class="statusConexao off" id="statusConexao">● off</div>
 
-    <!-- TELA 1 — LOGIN -->
     <section id="telaLogin" class="tela ativa">
       <h1 class="tituloLogin">LOGIN</h1>
       <input
@@ -354,7 +288,6 @@ html, body {
       </button>
     </section>
 
-    <!-- TELA 2 — PRINCIPAL -->
     <section id="telaPrincipal" class="tela">
       <header class="topoPrincipal">
         <button id="btnAbrirChat" class="btnTopo" title="Chat">
@@ -364,7 +297,6 @@ html, body {
           </svg>
           <span>chat</span>
         </button>
-
         <button id="btnSair" class="btnTopo" title="Sair da conta">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="black" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -376,7 +308,6 @@ html, body {
       </header>
 
       <h1 class="tituloRadio">Radio web</h1>
-
       <div class="statusAoVivo" id="statusAoVivo">offline</div>
 
       <button id="btnPlay" class="btnPlay" aria-label="Tocar">
@@ -386,7 +317,6 @@ html, body {
       <div class="nomeMusica" id="nomeMusica">nome da musica</div>
     </section>
 
-    <!-- CHAT — POP-UP -->
     <div id="popupChat">
       <header class="topoChat">
         <button id="btnFecharChat" class="btnX">✕</button>
@@ -410,7 +340,6 @@ html, body {
       </footer>
     </div>
 
-    <!-- MODAL DE SAIR -->
     <div id="modalSair">
       <div class="caixa">
         <h3>Sair da conta?</h3>
@@ -426,14 +355,8 @@ html, body {
 </div>
 
 <script>
-/* ==========================================================
-   CONFIG — API
-   ========================================================== */
 const API_WS = 'wss://radio-web-api.onrender.com/ws/stream';
 
-/* ==========================================================
-   ESTADO
-   ========================================================== */
 const estado = {
   usuario: '',
   tocando: false,
@@ -465,7 +388,6 @@ const btnConfirmarSair = document.getElementById('btnConfirmarSair');
 
 const statusConexaoEl  = document.getElementById('statusConexao');
 
-// Trava gestos
 document.addEventListener('touchmove', (e) => {
   if (!e.target.closest('.areaMensagens')) e.preventDefault();
 }, { passive: false });
@@ -497,18 +419,13 @@ function conectarWebSocket() {
       if (typeof event.data === 'string') {
         try {
           const msg = JSON.parse(event.data);
-
           if (msg.type === 'meta') {
             atualizarStatusAoVivo(!!msg.live);
             atualizarNomeMusica(msg.title);
+            atualizarMediaSession(msg.title);
           }
-
           if (msg.type === 'chat') {
-            adicionarMensagem({
-              autor: msg.user || 'ouvinte',
-              texto: msg.text,
-              eu: false,
-            });
+            adicionarMensagem({ autor: msg.user || 'ouvinte', texto: msg.text, eu: false });
           }
         } catch (e) { console.warn('Msg inválida:', e); }
       } else {
@@ -585,18 +502,15 @@ btnCancelarSair.addEventListener('click', () => {
 
 btnConfirmarSair.addEventListener('click', () => {
   modalSair.classList.remove('ativo');
-
   if (estado.tocando) {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
   }
-
   popupChat.classList.remove('ativo');
   desconectarWebSocket();
   localStorage.removeItem('radioUsuario');
   estado.usuario = '';
   inputUsuario.value = '';
-
   mostrarTela(telaLogin);
   setTimeout(() => inputUsuario.focus(), 200);
 });
@@ -606,7 +520,7 @@ modalSair.addEventListener('click', (e) => {
 });
 
 /* ==========================================================
-   PLAY — Inicia/para a reprodução do áudio
+   PLAY
    ========================================================== */
 btnPlay.addEventListener('click', () => {
   estado.tocando = !estado.tocando;
@@ -617,9 +531,9 @@ btnPlay.addEventListener('click', () => {
 
   if (estado.tocando) {
     console.log('▶ Tocando');
+    registrarMediaSession();
   } else {
     console.log('⏸ Pausado');
-    // Limpa fila de agendamento
     proximoInicio = audioCtx ? audioCtx.currentTime : 0;
   }
 });
@@ -632,6 +546,47 @@ function atualizarStatusAoVivo(aoVivo) {
 
 function atualizarNomeMusica(titulo) {
   nomeMusica.textContent = titulo || 'nome da musica';
+}
+
+/* ==========================================================
+   MEDIA SESSION — mantém áudio vivo em background
+   ========================================================== */
+function registrarMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: 'Radio Web - Ao Vivo',
+    artist: 'Radio Web',
+    album: 'Radio Web',
+  });
+
+  navigator.mediaSession.setActionHandler('play', () => {
+    estado.tocando = true;
+    btnPlay.classList.add('tocando');
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  });
+
+  navigator.mediaSession.setActionHandler('pause', () => {
+    estado.tocando = false;
+    btnPlay.classList.remove('tocando');
+  });
+
+  navigator.mediaSession.setActionHandler('stop', () => {
+    estado.tocando = false;
+    btnPlay.classList.remove('tocando');
+  });
+
+  navigator.mediaSession.playbackState = 'playing';
+}
+
+function atualizarMediaSession(titulo) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: titulo || 'Radio Web - Ao Vivo',
+    artist: 'Radio Web',
+    album: 'Radio Web',
+  });
 }
 
 /* ==========================================================
@@ -653,11 +608,7 @@ function enviarMensagem() {
   adicionarMensagem({ autor: estado.usuario, texto, eu: true });
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'chat',
-      user: estado.usuario,
-      text: texto,
-    }));
+    ws.send(JSON.stringify({ type: 'chat', user: estado.usuario, text: texto }));
   }
 
   inputMensagem.value = '';
@@ -673,7 +624,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
 }
 
 /* ==========================================================
-   ÁUDIO — Recebe PCM 16-bit e toca em fila (jitter buffer)
+   ÁUDIO
    ========================================================== */
 let audioCtx = null;
 let proximoInicio = 0;
@@ -690,7 +641,6 @@ function tocarChunkAudio(arrayBuffer) {
   initAudio();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 
-  // Converte Int16 → Float32
   const int16 = new Int16Array(arrayBuffer);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) {
@@ -705,13 +655,31 @@ function tocarChunkAudio(arrayBuffer) {
   source.connect(audioCtx.destination);
 
   const agora = audioCtx.currentTime;
-  // Se atrasou muito (mais de 0.5s), resincroniza
-  if (proximoInicio < agora - 0.5) {
-    proximoInicio = agora;
-  }
+  if (proximoInicio < agora - 0.5) proximoInicio = agora;
   const inicio = Math.max(agora, proximoInicio);
   source.start(inicio);
   proximoInicio = inicio + buffer.duration;
+}
+
+/* ==========================================================
+   SERVICE WORKER — PWA
+   ========================================================== */
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'radio-web-v2';
+    self.addEventListener('install', (e) => {
+      e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+    self.addEventListener('fetch', (e) => {
+      e.respondWith(
+        caches.match(e.request).then(r => r || fetch(e.request).catch(() => caches.match('./')))
+      );
+    });
+  `;
+  const blob = new Blob([swCode], { type: 'application/javascript' });
+  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
 }
 </script>
 </body>
