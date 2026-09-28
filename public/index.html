@@ -432,17 +432,14 @@ async function desativarWakeLock() {
   }
 }
 
-// Reativa o wake lock quando a tela volta
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible') {
     if (estado.tocando && !wakeLock) {
       await ativarWakeLock();
     }
-    // Resume o AudioContext se estiver suspenso
     if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
-    // Força reconexão do WS se caiu
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       conectarWebSocket();
     }
@@ -453,20 +450,20 @@ document.addEventListener('visibilitychange', async () => {
    WEBSOCKET
    ========================================================== */
 function conectarWebSocket() {
-  // Se já tem uma conexão aberta, não faz nada
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
 
   try {
-    ws = new WebSocket(`${API_WS}?role=listener`);
+    const nomeUsuario = encodeURIComponent(estado.usuario || 'anônimo');
+    ws = new WebSocket(`${API_WS}?role=listener&user=${nomeUsuario}`);
     ws.binaryType = 'arraybuffer';
 
     ws.addEventListener('open', () => {
       estado.conectado = true;
       tentativasReconexao = 0;
       atualizarStatusConexao(true);
-      console.log('✅ Conectado');
+      console.log('✅ Conectado como', estado.usuario);
     });
 
     ws.addEventListener('message', (event) => {
@@ -479,7 +476,16 @@ function conectarWebSocket() {
             atualizarMediaSession(msg.title);
           }
           if (msg.type === 'chat') {
-            adicionarMensagem({ autor: msg.user || 'ouvinte', texto: msg.text, eu: false });
+            // Só mostra se for mensagem do locutor (broadcaster) pra mim
+            const ehMinha = msg.user === estado.usuario;
+            const ehDoLocutor = msg.role === 'broadcaster';
+            if (ehDoLocutor && !ehMinha) {
+              adicionarMensagem({
+                autor: msg.user || 'locutor',
+                texto: msg.text,
+                eu: false,
+              });
+            }
           }
         } catch (e) { console.warn('Msg inválida:', e); }
       } else {
@@ -492,7 +498,6 @@ function conectarWebSocket() {
       atualizarStatusConexao(false);
       atualizarStatusAoVivo(false);
 
-      // Reconexão rápida: 500ms, 1s, 2s, 4s (máx 5s)
       tentativasReconexao++;
       const delay = Math.min(500 * Math.pow(2, tentativasReconexao - 1), 5000);
       console.log(`🔄 Reconectando em ${delay}ms...`);
@@ -593,6 +598,8 @@ btnPlay.addEventListener('click', async () => {
     console.log('▶ Tocando');
     await ativarWakeLock();
     registrarMediaSession();
+    // Garante que o WS está conectado (com o nome do usuário)
+    conectarWebSocket();
   } else {
     console.log('⏸ Pausado');
     await desativarWakeLock();
@@ -718,12 +725,10 @@ function tocarChunkAudio(arrayBuffer) {
   source.connect(audioCtx.destination);
 
   const agora = audioCtx.currentTime;
-  // Sincronização: se atrasou mais de 0.3s, pula pra frente
   if (proximoInicio < agora - 0.3) {
     console.log('⚠️ Sincronizando áudio (estava atrasado)');
     proximoInicio = agora;
   }
-  // Se adiantou muito (mais de 1.5s), atrasa
   else if (proximoInicio > agora + 1.5) {
     proximoInicio = agora + 0.05;
   }
@@ -755,7 +760,7 @@ if ('serviceWorker' in navigator) {
 }
 
 /* ==========================================================
-   MONITOR DE ÁUDIO — tenta manter contexto ativo
+   MONITOR DE ÁUDIO
    ========================================================== */
 setInterval(() => {
   if (estado.tocando && audioCtx && audioCtx.state === 'suspended') {
