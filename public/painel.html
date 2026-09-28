@@ -435,7 +435,8 @@ const STREAM_TOKEN = 'radio-anderson-2026-x7k9p2m4n8q1';
    ========================================================== */
 const estado = {
   usuario: '',
-  aoVivo: false,
+  aoVivo: false,               // Mic ligado?
+  transmitindo: false,         // Enviando áudio via WS?
   reproduzirTodas: false,
   ouvintes: [],
   conectado: false,
@@ -465,6 +466,7 @@ const player = new Audio();
 player.crossOrigin = 'anonymous';
 let itemTocandoAgora = null;
 const filaAutoDj = [];
+const filaAoVivo = [];        // lista da playlist AO VIVO
 
 let analyser = null;
 let dataArray = null;
@@ -487,7 +489,6 @@ function conectarWS() {
     estado.conectado = true;
     atualizarStatusConexao(true);
     console.log('✅ Conectado');
-    // Envia lista de usuários/status inicial
     enviarStatus();
   });
 
@@ -498,22 +499,24 @@ function conectarWS() {
 
       if (msg.type === 'ready') console.log('🎙️ Pronto');
       if (msg.type === 'meta') {
-        // Atualiza contador de ouvintes
         if (msg.listeners !== undefined) {
-          estado.ouvintes = msg.listeners > 0 ? estado.ouvintes : [];
-          document.getElementById('visorTotal').textContent = String(msg.listeners).padStart(2,'0');
+          atualizarVisor(msg.listeners);
         }
       }
       if (msg.type === 'chat') {
         receberChat(msg);
-        if (msg.role === 'listener') {
-          adicionarUsuarioChat(msg.user);
-        }
+        if (msg.role === 'listener') adicionarUsuarioChat(msg.user);
       }
       if (msg.type === 'usuarios') {
         atualizarListaUsuarios(msg.lista);
       }
-      if (msg.type === 'error') alert('Erro: ' + msg.message);
+      if (msg.type === 'error') {
+        // Alerta o usuário mas não bloqueia — só loga
+        console.warn('Erro do servidor:', msg.message);
+        if (msg.message === 'Já existe transmissão ativa') {
+          atualizarStatusConexao(false);
+        }
+      }
     } catch (e) { console.warn('Msg inválida:', e); }
   });
 
@@ -528,10 +531,7 @@ function conectarWS() {
 
 function enviarStatus() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({
-    type: 'status',
-    user: estado.usuario,
-  }));
+  ws.send(JSON.stringify({ type: 'status', user: estado.usuario }));
 }
 
 function atualizarStatusConexao(online) {
@@ -541,7 +541,7 @@ function atualizarStatusConexao(online) {
 }
 
 /* ==========================================================
-   ÁUDIO — Inicializa com compressor + limiter (melhor qualidade)
+   ÁUDIO — inicialização
    ========================================================== */
 async function inicializarAudio() {
   if (audioCtx) return;
@@ -552,11 +552,9 @@ async function inicializarAudio() {
   });
   await audioCtx.resume();
 
-  // Mixer com leve limitação pra evitar clipping (ruído)
   mixerNode = audioCtx.createGain();
   mixerNode.gain.value = 0.9;
 
-  // Compressor: suaviza picos (reduz "ruído"/estalos)
   const compressor = audioCtx.createDynamicsCompressor();
   compressor.threshold.value = -18;
   compressor.knee.value = 12;
@@ -565,14 +563,12 @@ async function inicializarAudio() {
   compressor.release.value = 0.25;
   mixerNode.connect(compressor);
 
-  // Lowpass suave pra tirar ruído agudo (chiado de fundo)
   const lowpass = audioCtx.createBiquadFilter();
   lowpass.type = 'lowpass';
   lowpass.frequency.value = 15000;
   lowpass.Q.value = 0.7;
   compressor.connect(lowpass);
 
-  // Limiter final — evita estouro
   limiterNode = audioCtx.createDynamicsCompressor();
   limiterNode.threshold.value = -3;
   limiterNode.knee.value = 0;
@@ -581,36 +577,32 @@ async function inicializarAudio() {
   limiterNode.release.value = 0.1;
   lowpass.connect(limiterNode);
 
-  // Mic gain
   micGain = audioCtx.createGain();
   micGain.gain.value = document.getElementById('sliderMic').value / 100;
 
-  // Media gain
   mediaGain = audioCtx.createGain();
   mediaGain.gain.value = document.getElementById('sliderMidia').value / 100;
 
-  // Fonte da música
   playerSource = audioCtx.createMediaElementSource(player);
   playerSource.connect(mediaGain);
   mediaGain.connect(mixerNode);
 
-  // Monitor (só música pras caixas do PC)
   monitorGain = audioCtx.createGain();
   monitorGain.gain.value = 0.8;
   mediaGain.connect(monitorGain);
   monitorGain.connect(audioCtx.destination);
 
-  // Analisador (LEDs) — conectado no limiter (já filtrado)
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   analyser.smoothingTimeConstant = 0.6;
   limiterNode.connect(analyser);
   dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-  // Processor — 8192 samples (melhor qualidade)
   processorNode = audioCtx.createScriptProcessor(8192, 1, 1);
   processorNode.onaudioprocess = (e) => {
-    if (!estado.aoVivo || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // 🔴 TRANSMITE SEMPRE que a fila estiver tocando OU o AO VIVO estiver ligado
+    const deveEnviar = estado.aoVivo || estado.musicaTocando;
+    if (!deveEnviar || !ws || ws.readyState !== WebSocket.OPEN) return;
 
     const input = e.inputBuffer.getChannelData(0);
     const int16 = new Int16Array(input.length);
@@ -619,6 +611,11 @@ async function inicializarAudio() {
       int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
     ws.send(int16.buffer);
+
+    if (!estado.transmitindo) {
+      estado.transmitindo = true;
+      ws.send(JSON.stringify({ type: 'meta', live: true, title: nomeMusicaAtual() }));
+    }
   };
   limiterNode.connect(processorNode);
   const silencio = audioCtx.createGain();
@@ -627,7 +624,11 @@ async function inicializarAudio() {
   silencio.connect(audioCtx.destination);
 
   loopAnalise();
-  console.log('🎧 Áudio inicializado com compressor + limiter');
+  console.log('🎧 Áudio inicializado');
+}
+
+function nomeMusicaAtual() {
+  return itemTocandoAgora ? itemTocandoAgora.querySelector('.info span').textContent : 'Radio Web';
 }
 
 async function ligarMicrofone() {
@@ -658,7 +659,7 @@ function desligarMicrofone() {
 }
 
 /* ==========================================================
-   AO VIVO — só liga/desliga mic (AutoDJ continua)
+   AO VIVO — só liga/desliga o mic
    ========================================================== */
 const btnAoVivo = document.getElementById('btnAoVivo');
 btnAoVivo.addEventListener('click', async () => {
@@ -670,18 +671,12 @@ btnAoVivo.addEventListener('click', async () => {
       estado.aoVivo = true;
       btnAoVivo.classList.add('ligado');
       btnAoVivo.textContent = 'NO AR';
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'meta', live: true }));
-      }
     } catch (err) { console.warn(err.message); }
   } else {
     estado.aoVivo = false;
     desligarMicrofone();
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'meta', live: false }));
-    }
   }
 });
 
@@ -726,7 +721,7 @@ function loopAnalise() {
 }
 
 /* ==========================================================
-   PLAYER
+   PLAYER — AutoDJ
    ========================================================== */
 function tocarItemDaFila(index) {
   if (index < 0 || index >= filaAutoDj.length) return;
@@ -741,16 +736,15 @@ function tocarItemDaFila(index) {
   entrada.item.classList.add('tocando');
   itemTocandoAgora = entrada.item;
   itemTocandoAgora._indice = index;
+  itemTocandoAgora._origem = 'autodj';
   estado.musicaTocando = true;
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'meta', title: entrada.arquivo.name, live: estado.aoVivo }));
-  }
+  enviarMeta(entrada.arquivo.name);
 }
 
 function proximaMusica() {
   if (filaAutoDj.length === 0) return;
-  const atual = itemTocandoAgora ? itemTocandoAgora._indice : -1;
+  const atual = itemTocandoAgora && itemTocandoAgora._origem === 'autodj' ? itemTocandoAgora._indice : -1;
   let proximo = atual + 1;
 
   if (proximo >= filaAutoDj.length) {
@@ -765,43 +759,69 @@ function proximaMusica() {
   tocarItemDaFila(proximo);
 }
 
+/* ==========================================================
+   PLAYER — Playlist AO VIVO (toca em sequência também)
+   ========================================================== */
+function tocarItemAoVivo(index) {
+  if (index < 0 || index >= filaAoVivo.length) return;
+  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+
+  const entrada = filaAoVivo[index];
+  player.src = entrada.url;
+  player.play().then(() => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }).catch(err => console.warn('Erro ao tocar:', err.message));
+
+  entrada.item.classList.add('tocando');
+  itemTocandoAgora = entrada.item;
+  itemTocandoAgora._indice = index;
+  itemTocandoAgora._origem = 'aovivo';
+  estado.musicaTocando = true;
+
+  enviarMeta(entrada.arquivo.name);
+}
+
+function proximaMusicaAoVivo() {
+  if (filaAoVivo.length === 0) return;
+  const atual = itemTocandoAgora && itemTocandoAgora._origem === 'aovivo' ? itemTocandoAgora._indice : -1;
+  let proximo = atual + 1;
+
+  if (proximo >= filaAoVivo.length) {
+    // volta pro início em loop
+    proximo = 0;
+  }
+  tocarItemAoVivo(proximo);
+}
+
+/* ==========================================================
+   EVENTO ENDED — decide qual fila avançar
+   ========================================================== */
 player.addEventListener('ended', () => {
-  // 🔴 CORRIGIDO: sempre passa pra próxima
-  if (itemTocandoAgora && itemTocandoAgora._indice !== undefined) {
+  if (!itemTocandoAgora) return;
+
+  const origem = itemTocandoAgora._origem;
+
+  if (origem === 'autodj') {
     proximaMusica();
+  } else if (origem === 'aovivo') {
+    proximaMusicaAoVivo();
   } else {
-    if (itemTocandoAgora) {
-      itemTocandoAgora.classList.remove('tocando');
-      itemTocandoAgora = null;
-    }
+    itemTocandoAgora.classList.remove('tocando');
+    itemTocandoAgora = null;
     estado.musicaTocando = false;
-    // Se a playlist não terminou, tenta tocar a próxima
-    if (filaAutoDj.length > 0 && estado.reproduzirTodas) {
-      tocarItemDaFila(0);
-    }
   }
 });
 
-function tocarMusica(url, item, nomeArquivo) {
-  if (itemTocandoAgora === item && !player.paused) {
-    player.pause();
-    item.classList.remove('tocando');
-    itemTocandoAgora = null;
-    estado.musicaTocando = false;
-    return;
-  }
-  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
-  player.src = url;
-  player.play().then(() => {
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-  }).catch(err => console.warn(err.message));
-  item.classList.add('tocando');
-  itemTocandoAgora = item;
-  itemTocandoAgora._indice = undefined;
-  estado.musicaTocando = true;
-
-  if (ws && ws.readyState === WebSocket.OPEN && nomeArquivo) {
-    ws.send(JSON.stringify({ type: 'meta', title: nomeArquivo, live: estado.aoVivo }));
+/* ==========================================================
+   ENVIA METADADOS
+   ========================================================== */
+function enviarMeta(titulo) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'meta',
+      title: titulo,
+      live: true,
+    }));
   }
 }
 
@@ -947,7 +967,8 @@ function criarItemPlaylist(arquivo, tipo) {
     </div>
   `;
 
-  item.querySelector('.play').addEventListener('click', () => {
+  item.querySelector('.play').addEventListener('click', async () => {
+    if (!audioCtx) await inicializarAudio();
     if (tipo === 'autoDj') {
       const idx = filaAutoDj.findIndex(e => e.item === item);
       if (idx !== -1) {
@@ -955,12 +976,23 @@ function criarItemPlaylist(arquivo, tipo) {
           player.pause();
           item.classList.remove('tocando');
           itemTocandoAgora = null;
+          estado.musicaTocando = false;
         } else {
           tocarItemDaFila(idx);
         }
       }
     } else {
-      tocarMusica(url, item, arquivo.name);
+      const idx = filaAoVivo.findIndex(e => e.item === item);
+      if (idx !== -1) {
+        if (itemTocandoAgora === item && !player.paused) {
+          player.pause();
+          item.classList.remove('tocando');
+          itemTocandoAgora = null;
+          estado.musicaTocando = false;
+        } else {
+          tocarItemAoVivo(idx);
+        }
+      }
     }
   });
 
@@ -968,11 +1000,15 @@ function criarItemPlaylist(arquivo, tipo) {
     if (itemTocandoAgora === item) {
       player.pause();
       itemTocandoAgora = null;
+      estado.musicaTocando = false;
     }
     URL.revokeObjectURL(url);
     if (tipo === 'autoDj') {
       const idx = filaAutoDj.findIndex(e => e.item === item);
       if (idx !== -1) filaAutoDj.splice(idx, 1);
+    } else {
+      const idx = filaAoVivo.findIndex(e => e.item === item);
+      if (idx !== -1) filaAoVivo.splice(idx, 1);
     }
     item.remove();
   });
@@ -991,12 +1027,13 @@ document.getElementById('btnAddMusicaAoVivo').addEventListener('click', () => {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'audio/*';
+  input.multiple = true;
   input.onchange = (e) => {
-    const arquivo = e.target.files[0];
-    if (arquivo) {
+    Array.from(e.target.files).forEach(arquivo => {
       const item = criarItemPlaylist(arquivo, 'aoVivo');
       document.getElementById('playlistAoVivo').appendChild(item);
-    }
+      filaAoVivo.push({ url: item._url, item, arquivo });
+    });
   };
   input.click();
 });
@@ -1049,19 +1086,15 @@ function enviarMsgChat() {
   const input = document.getElementById('inputChat');
   const texto = input.value.trim();
   if (!texto) return;
-
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'chat', user: estado.usuario, text: texto }));
   }
-
   adicionarMsgChat({ user: estado.usuario, text: texto, role: 'broadcaster' });
   input.value = '';
 }
 
 function receberChat(msg) {
   adicionarMsgChat(msg);
-
-  // 🔴 Badge verde com contador quando chat fechado
   if (!modalChat.classList.contains('ativo')) {
     const badge = document.getElementById('badgeMensagens');
     const atual = parseInt(badge.textContent) || 0;
@@ -1079,7 +1112,6 @@ function adicionarMsgChat({ user, text, role }) {
   container.scrollTop = container.scrollHeight;
 }
 
-/* Lista de usuários no chat */
 const usuariosChat = new Set();
 function adicionarUsuarioChat(nome) {
   if (!nome) return;
@@ -1101,11 +1133,11 @@ function atualizarListaUsuarios(lista) {
 /* ==========================================================
    VISOR
    ========================================================== */
-function atualizarVisor() {
-  document.getElementById('visorCliques').textContent = String(estado.ouvintes.length).padStart(2,'0');
-  document.getElementById('visorTotal').textContent = String(estado.ouvintes.length).padStart(2,'0');
-  document.getElementById('visorOuvindo').textContent = 
-    estado.ouvintes.length > 0 ? estado.ouvintes[estado.ouvintes.length - 1] : '—';
+function atualizarVisor(listeners) {
+  const n = (listeners !== undefined && listeners !== null) ? listeners : estado.ouvintes.length;
+  document.getElementById('visorCliques').textContent = String(n).padStart(2,'0');
+  document.getElementById('visorTotal').textContent = String(n).padStart(2,'0');
+  document.getElementById('visorOuvindo').textContent = n > 0 ? 'ouvintes' : '—';
 }
 atualizarVisor();
 </script>
