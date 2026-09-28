@@ -1,9 +1,10 @@
-// Gerencia o estado da transmissão e os ouvintes conectados.
+// Gerencia o estado da transmissão, ouvintes e chat privado.
 class StreamManager {
   constructor() {
-    this.listeners = new Map();
+    this.listeners = new Map();        // id -> { ws, user }
     this.broadcaster = null;
     this.usuariosChat = new Set();
+    this.historicoChat = [];            // { id, de, para, texto, time, role }
 
     this.state = {
       live: false,
@@ -36,25 +37,35 @@ class StreamManager {
   }
 
   // ---- Ouvintes ----
-  addListener(id, ws) {
-    this.listeners.set(id, ws);
+  addListener(id, ws, user) {
+    this.listeners.set(id, { ws, user: user || 'anônimo' });
     this.notificarOuvintes();
     this.notificarMetaBroadcaster();
+    this.enviarListaOuvintes();
   }
 
   removeListener(id) {
     this.listeners.delete(id);
     this.notificarOuvintes();
     this.notificarMetaBroadcaster();
+    this.enviarListaOuvintes();
   }
 
   getListenerCount() {
     return this.listeners.size;
   }
 
+  getListenerNames() {
+    const nomes = [];
+    for (const { user } of this.listeners.values()) {
+      if (user && !nomes.includes(user)) nomes.push(user);
+    }
+    return nomes;
+  }
+
   // ---- Distribuição de áudio ----
   broadcastAudio(chunk) {
-    for (const [id, ws] of this.listeners) {
+    for (const [id, { ws }] of this.listeners) {
       if (ws.readyState === 1) {
         ws.send(chunk, { binary: true });
       } else {
@@ -63,32 +74,68 @@ class StreamManager {
     }
   }
 
-  // ---- Chat ----
-  broadcastChat({ user, text, role }) {
-    const payload = JSON.stringify({
+  // ---- Chat privado ----
+  broadcastChat({ user, text, role, target }) {
+    // target = nome do destinatário (ou null = para todos / broadcaster)
+    const msg = {
       type: 'chat',
       user,
       text,
       role,
+      target: target || null,
       time: Date.now(),
-    });
+    };
+    this.historicoChat.push(msg);
+    if (this.historicoChat.length > 500) this.historicoChat.shift();
 
-    if (user && role === 'listener') {
+    const payload = JSON.stringify(msg);
+
+    if (role === 'listener') {
       this.usuariosChat.add(user);
     }
 
-    for (const [, ws] of this.listeners) {
-      if (ws.readyState === 1) ws.send(payload);
-    }
-
+    // Envia para o broadcaster (painel) SEMPRE
     if (this.broadcaster && this.broadcaster.readyState === 1) {
       this.broadcaster.send(payload);
-      // envia lista de usuários pro painel
       this.broadcaster.send(JSON.stringify({
         type: 'usuarios',
         lista: ['locutor', ...this.usuariosChat],
       }));
     }
+
+    // Se for mensagem do broadcaster para um listener específico
+    if (role === 'broadcaster' && target) {
+      for (const [, { ws, user: u }] of this.listeners) {
+        if (u === target && ws.readyState === 1) {
+          ws.send(payload);
+        }
+      }
+      return;
+    }
+
+    // Se for mensagem do broadcaster sem target (pública) → todos
+    if (role === 'broadcaster' && !target) {
+      for (const [, { ws }] of this.listeners) {
+        if (ws.readyState === 1) ws.send(payload);
+      }
+      return;
+    }
+
+    // Se for mensagem de listener → só broadcaster + o próprio listener
+    if (role === 'listener') {
+      for (const [, { ws, user: u }] of this.listeners) {
+        if (u === user && ws.readyState === 1) {
+          ws.send(payload);
+        }
+      }
+    }
+  }
+
+  enviarHistoricoChat(ws) {
+    ws.send(JSON.stringify({
+      type: 'historico',
+      mensagens: this.historicoChat,
+    }));
   }
 
   // ---- Metadados ----
@@ -101,13 +148,16 @@ class StreamManager {
   }
 
   notifyListenersMeta() {
-    const payload = JSON.stringify({ type: 'meta', ...this.state, listeners: this.getListenerCount() });
-    for (const [, ws] of this.listeners) {
+    const payload = JSON.stringify({
+      type: 'meta',
+      ...this.state,
+      listeners: this.getListenerCount(),
+    });
+    for (const [, { ws }] of this.listeners) {
       if (ws.readyState === 1) ws.send(payload);
     }
   }
 
-  // 🔴 Manda contagem de ouvintes pro broadcaster (painel)
   notificarMetaBroadcaster() {
     if (this.broadcaster && this.broadcaster.readyState === 1) {
       this.broadcaster.send(JSON.stringify({
@@ -118,7 +168,17 @@ class StreamManager {
     }
   }
 
-  // 🔴 Manda pra todos quando muda
+  // 🔴 Envia lista de nomes de ouvintes pro painel
+  enviarListaOuvintes() {
+    if (this.broadcaster && this.broadcaster.readyState === 1) {
+      this.broadcaster.send(JSON.stringify({
+        type: 'ouvintes',
+        nomes: this.getListenerNames(),
+        total: this.getListenerCount(),
+      }));
+    }
+  }
+
   notificarOuvintes() {
     this.notifyListenersMeta();
     this.notificarMetaBroadcaster();
@@ -128,6 +188,7 @@ class StreamManager {
     return {
       ...this.state,
       listeners: this.getListenerCount(),
+      ouvintes: this.getListenerNames(),
       uptime: this.state.startedAt
         ? Math.floor((Date.now() - this.state.startedAt) / 1000)
         : 0,
