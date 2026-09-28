@@ -459,4 +459,765 @@
   </div>
 </div>
 
-<!-- ⬇️ A PARTE 2 CONTINUA AQUI EMBAIXO (o <script>...</script>) ⬇️ -->
+<script>
+/* ==========================================================
+   CONFIG
+   ========================================================== */
+const API_WS = 'wss://radio-web-api.onrender.com/ws/stream';
+const STREAM_TOKEN = 'radio-anderson-2026-x7k9p2m4n8q1';
+
+/* ==========================================================
+   ESTADO
+   ========================================================== */
+const estado = {
+  usuario: '',
+  aoVivo: false,
+  transmitindo: false,
+  reproduzirTodas: false,
+  ouvintes: [],
+  conectado: false,
+  musicaTocando: false,
+  contatoAtivo: null,
+};
+
+let ws = null;
+const conversas = new Map();
+
+/* ==========================================================
+   ÁUDIO
+   ========================================================== */
+let audioCtx = null;
+let mixerNode = null;
+let limiterNode = null;
+let micSource = null;
+let playerSource = null;
+let processorNode = null;
+let micGain = null;
+let mediaGain = null;
+let monitorGain = null;
+let micStream = null;
+
+/* ==========================================================
+   PLAYER + ANALISADOR
+   ========================================================== */
+const player = new Audio();
+player.crossOrigin = 'anonymous';
+let itemTocandoAgora = null;
+const filaAutoDj = [];
+const filaAoVivo = [];
+
+let analyser = null;
+let dataArray = null;
+const HISTORICO = 40;
+let historicoEnergia = [];
+let ultimaBatida = 0;
+const INTERVALO_MIN_MS = 180;
+const MARGEM = 15;
+const ENERGIA_MIN = 25;
+let ledAtual = -1;
+
+/* ==========================================================
+   WEBSOCKET
+   ========================================================== */
+function conectarWS() {
+  const url = `${API_WS}?role=broadcaster&token=${encodeURIComponent(STREAM_TOKEN)}`;
+  ws = new WebSocket(url);
+
+  ws.addEventListener('open', () => {
+    estado.conectado = true;
+    atualizarStatusConexao(true);
+    console.log('✅ Conectado');
+    enviarStatus();
+  });
+
+  ws.addEventListener('message', (event) => {
+    if (typeof event.data !== 'string') return;
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'ready') console.log('🎙️ Pronto');
+      if (msg.type === 'meta' && msg.listeners !== undefined) atualizarVisorContagem(msg.listeners);
+      if (msg.type === 'ouvintes') atualizarListaOuvintes(msg.nomes, msg.total);
+      if (msg.type === 'chat') registrarMensagem(msg);
+      if (msg.type === 'historico') msg.mensagens.forEach(m => registrarMensagem(m, true));
+      if (msg.type === 'error') {
+        console.warn('Erro do servidor:', msg.message);
+        if (msg.message === 'Já existe transmissão ativa') atualizarStatusConexao(false);
+      }
+    } catch (e) { console.warn('Msg inválida:', e); }
+  });
+
+  ws.addEventListener('close', () => {
+    estado.conectado = false;
+    atualizarStatusConexao(false);
+    setTimeout(conectarWS, 3000);
+  });
+
+  ws.addEventListener('error', (err) => console.warn('WS erro:', err.message));
+}
+
+function enviarStatus() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'status', user: estado.usuario }));
+}
+
+function atualizarStatusConexao(online) {
+  const el = document.getElementById('statusConexao');
+  el.textContent = online ? '● conectado' : '● desconectado';
+  el.className = 'statusConexao ' + (online ? 'on' : 'off');
+}
+
+/* ==========================================================
+   ÁUDIO — inicialização
+   ========================================================== */
+async function inicializarAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+    sampleRate: 48000, latencyHint: 'interactive',
+  });
+  await audioCtx.resume();
+
+  mixerNode = audioCtx.createGain();
+  mixerNode.gain.value = 0.9;
+
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -18;
+  compressor.knee.value = 12;
+  compressor.ratio.value = 4;
+  compressor.attack.value = 0.003;
+  compressor.release.value = 0.25;
+  mixerNode.connect(compressor);
+
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = 15000;
+  lowpass.Q.value = 0.7;
+  compressor.connect(lowpass);
+
+  limiterNode = audioCtx.createDynamicsCompressor();
+  limiterNode.threshold.value = -3;
+  limiterNode.knee.value = 0;
+  limiterNode.ratio.value = 20;
+  limiterNode.attack.value = 0.001;
+  limiterNode.release.value = 0.1;
+  lowpass.connect(limiterNode);
+
+  micGain = audioCtx.createGain();
+  micGain.gain.value = document.getElementById('sliderMic').value / 100;
+
+  mediaGain = audioCtx.createGain();
+  mediaGain.gain.value = document.getElementById('sliderMidia').value / 100;
+
+  playerSource = audioCtx.createMediaElementSource(player);
+  playerSource.connect(mediaGain);
+  mediaGain.connect(mixerNode);
+
+  monitorGain = audioCtx.createGain();
+  monitorGain.gain.value = 0.8;
+  mediaGain.connect(monitorGain);
+  monitorGain.connect(audioCtx.destination);
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.6;
+  limiterNode.connect(analyser);
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+  processorNode = audioCtx.createScriptProcessor(8192, 1, 1);
+  processorNode.onaudioprocess = (e) => {
+    const deveEnviar = estado.aoVivo || estado.musicaTocando;
+    if (!deveEnviar || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const input = e.inputBuffer.getChannelData(0);
+    const int16 = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    ws.send(int16.buffer);
+    if (!estado.transmitindo) {
+      estado.transmitindo = true;
+      ws.send(JSON.stringify({ type: 'meta', live: true, title: nomeMusicaAtual() }));
+    }
+  };
+  limiterNode.connect(processorNode);
+  const silencio = audioCtx.createGain();
+  silencio.gain.value = 0;
+  processorNode.connect(silencio);
+  silencio.connect(audioCtx.destination);
+
+  loopAnalise();
+  console.log('🎧 Áudio inicializado');
+}
+
+function nomeMusicaAtual() {
+  return itemTocandoAgora ? itemTocandoAgora.querySelector('.info span').textContent : 'Radio Web';
+}
+
+async function ligarMicrofone() {
+  if (micSource) return;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+        sampleRate: 48000, channelCount: 1,
+      }
+    });
+    micSource = audioCtx.createMediaStreamSource(micStream);
+    micSource.connect(micGain);
+    micGain.connect(mixerNode);
+    console.log('🎤 Mic ligado');
+  } catch (err) {
+    alert('Erro ao acessar microfone: ' + err.message);
+    throw err;
+  }
+}
+
+function desligarMicrofone() {
+  if (micSource) { micSource.disconnect(); micSource = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+}
+
+/* ==========================================================
+   AO VIVO
+   ========================================================== */
+const btnAoVivo = document.getElementById('btnAoVivo');
+btnAoVivo.addEventListener('click', async () => {
+  if (!audioCtx) await inicializarAudio();
+  if (!estado.aoVivo) {
+    try {
+      await ligarMicrofone();
+      estado.aoVivo = true;
+      btnAoVivo.classList.add('ligado');
+      btnAoVivo.textContent = 'NO AR';
+    } catch (err) { console.warn(err.message); }
+  } else {
+    estado.aoVivo = false;
+    desligarMicrofone();
+    btnAoVivo.classList.remove('ligado');
+    btnAoVivo.textContent = 'AO VIVO';
+  }
+});
+
+/* ==========================================================
+   LEDs
+   ========================================================== */
+const leds = document.querySelectorAll('#painelLuzes .lamp');
+const barraBranca = document.getElementById('barraBranca');
+
+function acenderProximaLed() {
+  leds.forEach(l => l.classList.remove('acesa'));
+  ledAtual++;
+  if (ledAtual >= leds.length) ledAtual = 0;
+  if (leds[ledAtual]) {
+    leds[ledAtual].classList.add('acesa');
+    barraBranca.classList.add('ativa');
+    setTimeout(() => barraBranca.classList.remove('ativa'), 60);
+  }
+}
+
+function loopAnalise() {
+  requestAnimationFrame(loopAnalise);
+  if (!analyser || !dataArray) return;
+  analyser.getByteFrequencyData(dataArray);
+  const energia = (dataArray[0] + dataArray[1] + dataArray[2]) / 3;
+  historicoEnergia.push(energia);
+  if (historicoEnergia.length > HISTORICO) historicoEnergia.shift();
+  const media = historicoEnergia.reduce((a, b) => a + b, 0) / historicoEnergia.length;
+  const agora = performance.now();
+  const ehBatida = (energia > media + MARGEM) && (energia > ENERGIA_MIN);
+  if (ehBatida && (agora - ultimaBatida) > INTERVALO_MIN_MS) {
+    ultimaBatida = agora;
+    acenderProximaLed();
+  }
+}
+
+/* ==========================================================
+   PLAYER — AutoDJ
+   ========================================================== */
+function tocarItemDaFila(index) {
+  if (index < 0 || index >= filaAutoDj.length) return;
+  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+  const entrada = filaAutoDj[index];
+  player.src = entrada.url;
+  player.play().then(() => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }).catch(err => console.warn('Erro ao tocar:', err.message));
+  entrada.item.classList.add('tocando');
+  itemTocandoAgora = entrada.item;
+  itemTocandoAgora._indice = index;
+  itemTocandoAgora._origem = 'autodj';
+  estado.musicaTocando = true;
+  enviarMeta(entrada.arquivo.name);
+}
+
+function proximaMusica() {
+  if (filaAutoDj.length === 0) return;
+  const atual = itemTocandoAgora && itemTocandoAgora._origem === 'autodj' ? itemTocandoAgora._indice : -1;
+  let proximo = atual + 1;
+  if (proximo >= filaAutoDj.length) {
+    if (estado.reproduzirTodas) proximo = 0;
+    else {
+      if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+      itemTocandoAgora = null;
+      estado.musicaTocando = false;
+      return;
+    }
+  }
+  tocarItemDaFila(proximo);
+}
+
+/* ==========================================================
+   PLAYER — Playlist AO VIVO
+   ========================================================== */
+function tocarItemAoVivo(index) {
+  if (index < 0 || index >= filaAoVivo.length) return;
+  if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
+  const entrada = filaAoVivo[index];
+  player.src = entrada.url;
+  player.play().then(() => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }).catch(err => console.warn('Erro ao tocar:', err.message));
+  entrada.item.classList.add('tocando');
+  itemTocandoAgora = entrada.item;
+  itemTocandoAgora._indice = index;
+  itemTocandoAgora._origem = 'aovivo';
+  estado.musicaTocando = true;
+  enviarMeta(entrada.arquivo.name);
+}
+
+function proximaMusicaAoVivo() {
+  if (filaAoVivo.length === 0) return;
+  const atual = itemTocandoAgora && itemTocandoAgora._origem === 'aovivo' ? itemTocandoAgora._indice : -1;
+  let proximo = atual + 1;
+  if (proximo >= filaAoVivo.length) proximo = 0;
+  tocarItemAoVivo(proximo);
+}
+
+player.addEventListener('ended', () => {
+  if (!itemTocandoAgora) return;
+  const origem = itemTocandoAgora._origem;
+  if (origem === 'autodj') proximaMusica();
+  else if (origem === 'aovivo') proximaMusicaAoVivo();
+  else {
+    itemTocandoAgora.classList.remove('tocando');
+    itemTocandoAgora = null;
+    estado.musicaTocando = false;
+  }
+});
+
+function enviarMeta(titulo) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'meta', title: titulo, live: true }));
+  }
+}
+
+/* ==========================================================
+   LOGIN
+   ========================================================== */
+const telaLogin = document.getElementById('telaLogin');
+const telaPainel = document.getElementById('telaPainel');
+const inputLogin = document.getElementById('inputUsuarioLogin');
+const btnCriar = document.getElementById('btnCriarLogin');
+
+const usuarioSalvo = localStorage.getItem('painelUsuario');
+if (usuarioSalvo) entrarNoPainel(usuarioSalvo);
+
+btnCriar.addEventListener('click', () => {
+  const nome = inputLogin.value.trim();
+  if (!nome) { alert('Digite um nome!'); return; }
+  localStorage.setItem('painelUsuario', nome);
+  entrarNoPainel(nome);
+});
+
+inputLogin.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') btnCriar.click();
+});
+
+async function entrarNoPainel(nome) {
+  estado.usuario = nome;
+  telaLogin.style.display = 'none';
+  telaPainel.classList.add('ativo');
+  document.getElementById('nomeUsuarioTopo').textContent = nome.toLowerCase();
+  conectarWS();
+  await inicializarAudio();
+  renderizarListaContatos();
+}
+
+/* ==========================================================
+   TOPO
+   ========================================================== */
+const modalNotas = document.getElementById('modalNotas');
+const modalChat = document.getElementById('modalChat');
+const modalVinheta = document.getElementById('modalVinheta');
+const modalSair = document.getElementById('modalSair');
+
+document.getElementById('btnBlocoNotas').addEventListener('click', () => {
+  modalNotas.classList.add('ativo');
+  document.getElementById('textoNotas').focus();
+});
+document.getElementById('fecharNotas').addEventListener('click', () => {
+  modalNotas.classList.remove('ativo');
+});
+document.getElementById('btnAbrirChat').addEventListener('click', () => {
+  modalChat.classList.add('ativo');
+  document.getElementById('badgeMensagens').style.display = 'none';
+  document.getElementById('badgeMensagens').textContent = '0';
+});
+document.getElementById('fecharChat').addEventListener('click', () => {
+  modalChat.classList.remove('ativo');
+});
+
+/* ==========================================================
+   SAIR
+   ========================================================== */
+document.getElementById('btnSairConta').addEventListener('click', () => {
+  modalSair.classList.add('ativo');
+});
+document.getElementById('btnCancelarSair').addEventListener('click', () => {
+  modalSair.classList.remove('ativo');
+});
+document.getElementById('btnConfirmarSair').addEventListener('click', () => {
+  if (estado.aoVivo) {
+    estado.aoVivo = false;
+    desligarMicrofone();
+    btnAoVivo.classList.remove('ligado');
+    btnAoVivo.textContent = 'AO VIVO';
+  }
+  if (!player.paused) player.pause();
+  if (ws) { ws.close(); ws = null; }
+  localStorage.removeItem('painelUsuario');
+  modalSair.classList.remove('ativo');
+  telaPainel.classList.remove('ativo');
+  telaLogin.style.display = 'flex';
+  inputLogin.value = '';
+  inputLogin.focus();
+});
+
+/* ==========================================================
+   VINHETAS
+   ========================================================== */
+document.getElementById('btnAddVinheta').addEventListener('click', () => {
+  modalVinheta.classList.add('ativo');
+});
+document.getElementById('fecharVinheta').addEventListener('click', () => {
+  modalVinheta.classList.remove('ativo');
+});
+document.querySelectorAll('.modalVinheta .bolinha').forEach(b => {
+  b.addEventListener('click', () => {
+    const escolha = b.dataset.escolha;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = (e) => {
+      const arquivo = e.target.files[0];
+      if (arquivo) {
+        const bolinha = document.querySelector(`.bolinha[data-vinheta="${escolha}"]`);
+        bolinha._arquivo = arquivo;
+        bolinha.style.boxShadow = '0 0 10px #fff';
+      }
+    };
+    input.click();
+    modalVinheta.classList.remove('ativo');
+  });
+});
+document.querySelectorAll('.bolinha[data-vinheta]').forEach(b => {
+  b.addEventListener('click', () => {
+    if (b._arquivo) {
+      const url = URL.createObjectURL(b._arquivo);
+      const tmp = new Audio(url);
+      tmp.play().catch(err => console.warn(err));
+    }
+  });
+});
+
+/* ==========================================================
+   PLAYLISTS
+   ========================================================== */
+function criarItemPlaylist(arquivo, tipo) {
+  const item = document.createElement('div');
+  item.className = 'item';
+  const url = URL.createObjectURL(arquivo);
+  item._url = url;
+  item.innerHTML = `
+    <div class="info">
+      <div class="play">▶</div>
+      <span>${arquivo.name}</span>
+    </div>
+    <div>
+      <span class="duracao">--:--</span>
+      <span class="apagar">apagar</span>
+    </div>
+  `;
+  item.querySelector('.play').addEventListener('click', async () => {
+    if (!audioCtx) await inicializarAudio();
+    if (tipo === 'autoDj') {
+      const idx = filaAutoDj.findIndex(e => e.item === item);
+      if (idx !== -1) {
+        if (itemTocandoAgora === item && !player.paused) {
+          player.pause();
+          item.classList.remove('tocando');
+          itemTocandoAgora = null;
+          estado.musicaTocando = false;
+        } else {
+          tocarItemDaFila(idx);
+        }
+      }
+    } else {
+      const idx = filaAoVivo.findIndex(e => e.item === item);
+      if (idx !== -1) {
+        if (itemTocandoAgora === item && !player.paused) {
+          player.pause();
+          item.classList.remove('tocando');
+          itemTocandoAgora = null;
+          estado.musicaTocando = false;
+        } else {
+          tocarItemAoVivo(idx);
+        }
+      }
+    }
+  });
+  item.querySelector('.apagar').addEventListener('click', () => {
+    if (itemTocandoAgora === item) {
+      player.pause();
+      itemTocandoAgora = null;
+      estado.musicaTocando = false;
+    }
+    URL.revokeObjectURL(url);
+    if (tipo === 'autoDj') {
+      const idx = filaAutoDj.findIndex(e => e.item === item);
+      if (idx !== -1) filaAutoDj.splice(idx, 1);
+    } else {
+      const idx = filaAoVivo.findIndex(e => e.item === item);
+      if (idx !== -1) filaAoVivo.splice(idx, 1);
+    }
+    item.remove();
+  });
+  const audioTemp = new Audio(url);
+  audioTemp.addEventListener('loadedmetadata', () => {
+    const min = Math.floor(audioTemp.duration / 60);
+    const seg = Math.floor(audioTemp.duration % 60).toString().padStart(2, '0');
+    item.querySelector('.duracao').textContent = `${min}:${seg}`;
+  });
+  return item;
+}
+
+document.getElementById('btnAddMusicaAoVivo').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.multiple = true;
+  input.onchange = (e) => {
+    Array.from(e.target.files).forEach(arquivo => {
+      const item = criarItemPlaylist(arquivo, 'aoVivo');
+      document.getElementById('playlistAoVivo').appendChild(item);
+      filaAoVivo.push({ url: item._url, item, arquivo });
+    });
+  };
+  input.click();
+});
+
+document.getElementById('btnAddMusicaAutoDj').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.multiple = true;
+  input.onchange = (e) => {
+    Array.from(e.target.files).forEach(arquivo => {
+      const item = criarItemPlaylist(arquivo, 'autoDj');
+      document.getElementById('playlistAutoDj').appendChild(item);
+      filaAutoDj.push({ url: item._url, item, arquivo });
+    });
+  };
+  input.click();
+});
+
+const btnReproduzirTodas = document.getElementById('btnReproduzirTodas');
+btnReproduzirTodas.addEventListener('click', async () => {
+  if (!audioCtx) await inicializarAudio();
+  estado.reproduzirTodas = !estado.reproduzirTodas;
+  btnReproduzirTodas.classList.toggle('ligado', estado.reproduzirTodas);
+  if (estado.reproduzirTodas && !itemTocandoAgora && filaAutoDj.length > 0) {
+    tocarItemDaFila(0);
+  }
+});
+
+/* ==========================================================
+   SLIDERS
+   ========================================================== */
+document.getElementById('sliderMic').addEventListener('input', (e) => {
+  if (micGain) micGain.gain.value = e.target.value / 100;
+});
+document.getElementById('sliderMidia').addEventListener('input', (e) => {
+  if (mediaGain) mediaGain.gain.value = e.target.value / 100;
+  player.volume = e.target.value / 100;
+});
+
+/* ==========================================================
+   VISOR
+   ========================================================== */
+function atualizarVisorContagem(listeners) {
+  const n = (listeners !== undefined && listeners !== null) ? listeners : 0;
+  document.getElementById('visorCliques').textContent = String(n).padStart(2,'0');
+  document.getElementById('visorTotal').textContent = String(n).padStart(2,'0');
+}
+
+function atualizarListaOuvintes(nomes, total) {
+  const container = document.getElementById('visorOuvindo');
+  container.innerHTML = '';
+  const nomesValidos = (nomes || []).filter(n =>
+    n && n.trim() !== '' &&
+    n.toLowerCase() !== 'anônimo' &&
+    n.toLowerCase() !== 'anonimo' &&
+    n.toLowerCase() !== 'anônima' &&
+    n.toLowerCase() !== 'anonima'
+  );
+  if (nomesValidos.length === 0) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'ninguém ouvindo';
+    container.appendChild(vazio);
+  } else {
+    nomesValidos.forEach(nome => {
+      const item = document.createElement('div');
+      item.className = 'ouvinteItem';
+      item.textContent = nome;
+      container.appendChild(item);
+    });
+  }
+  atualizarVisorContagem(nomesValidos.length);
+}
+
+/* ==========================================================
+   CHAT ESTILO WHATSAPP
+   ========================================================== */
+const usuariosChat = new Set();
+const naoLidas = new Map();
+
+function registrarMensagem(msg, silencioso = false) {
+  const contato = msg.role === 'listener' ? msg.user : (msg.target || 'locutor');
+  if (!conversas.has(contato)) conversas.set(contato, []);
+  conversas.get(contato).push(msg);
+  if (msg.role === 'listener' && msg.user) usuariosChat.add(msg.user);
+  if (!silencioso && msg.role === 'listener') {
+    const chatAberto = modalChat.classList.contains('ativo');
+    const ehContatoAtivo = estado.contatoAtivo === contato;
+    if (!chatAberto || !ehContatoAtivo) {
+      naoLidas.set(contato, (naoLidas.get(contato) || 0) + 1);
+      const badge = document.getElementById('badgeMensagens');
+      const atual = parseInt(badge.textContent) || 0;
+      badge.textContent = atual + 1;
+      badge.style.display = 'flex';
+    }
+  }
+  renderizarListaContatos();
+  if (estado.contatoAtivo === contato) renderizarMensagens();
+}
+
+function renderizarListaContatos() {
+  const container = document.getElementById('chatUsuarios');
+  container.innerHTML = '';
+  const todos = document.createElement('div');
+  todos.className = 'user' + (estado.contatoAtivo === '__todos__' ? ' ativo' : '');
+  todos.innerHTML = `<span class="nome">📢 Todos</span>`;
+  todos.addEventListener('click', () => selecionarContato('__todos__'));
+  container.appendChild(todos);
+  const lista = Array.from(usuariosChat).sort();
+  lista.forEach(nome => {
+    const div = document.createElement('div');
+    div.className = 'user' + (estado.contatoAtivo === nome ? ' ativo' : '');
+    const naoLidasCount = naoLidas.get(nome) || 0;
+    div.innerHTML = `
+      <span class="dot"></span>
+      <span class="nome">${nome}</span>
+      ${naoLidasCount > 0 ? `<span class="contador">${naoLidasCount}</span>` : ''}
+    `;
+    div.addEventListener('click', () => selecionarContato(nome));
+    container.appendChild(div);
+  });
+}
+
+function selecionarContato(nome) {
+  estado.contatoAtivo = nome;
+  if (nome !== '__todos__') naoLidas.set(nome, 0);
+  let total = 0;
+  for (const v of naoLidas.values()) total += v;
+  const badge = document.getElementById('badgeMensagens');
+  if (total > 0) { badge.textContent = total; badge.style.display = 'flex'; }
+  else badge.style.display = 'none';
+  renderizarListaContatos();
+  renderizarMensagens();
+  document.getElementById('inputChat').focus();
+}
+
+function renderizarMensagens() {
+  const container = document.getElementById('chatMensagens');
+  container.innerHTML = '';
+  if (!estado.contatoAtivo) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'Selecione um contato para ver as mensagens';
+    container.appendChild(vazio);
+    return;
+  }
+  let mensagens = [];
+  if (estado.contatoAtivo === '__todos__') {
+    for (const lista of conversas.values()) mensagens = mensagens.concat(lista);
+    mensagens.sort((a, b) => (a.time || 0) - (b.time || 0));
+  } else {
+    mensagens = conversas.get(estado.contatoAtivo) || [];
+  }
+  if (mensagens.length === 0) {
+    const vazio = document.createElement('div');
+    vazio.className = 'vazio';
+    vazio.textContent = 'Nenhuma mensagem ainda';
+    container.appendChild(vazio);
+    return;
+  }
+  mensagens.forEach(msg => {
+    const div = document.createElement('div');
+    const ehEnviada = msg.role === 'broadcaster';
+    div.className = 'msg ' + (ehEnviada ? 'enviada' : 'recebida');
+    if (msg.target) div.classList.add('privada');
+    const hora = new Date(msg.time || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    div.innerHTML = `
+      <span class="autor">${ehEnviada ? 'você' : msg.user}${msg.target ? ' 🔒' : ''}</span>
+      ${msg.text}
+      <span class="hora">${hora}</span>
+    `;
+    container.appendChild(div);
+  });
+  container.scrollTop = container.scrollHeight;
+}
+
+/* ==========================================================
+   ENVIO DE MENSAGEM
+   ========================================================== */
+document.getElementById('btnEnviarChat').addEventListener('click', enviarMsgChat);
+document.getElementById('inputChat').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') enviarMsgChat();
+});
+
+function enviarMsgChat() {
+  const input = document.getElementById('inputChat');
+  const texto = input.value.trim();
+  if (!texto) return;
+  if (!estado.contatoAtivo) { alert('Selecione um contato primeiro!'); return; }
+  const target = estado.contatoAtivo === '__todos__' ? null : estado.contatoAtivo;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'chat', user: estado.usuario, text: texto, target,
+    }));
+  }
+  const msg = {
+    type: 'chat', user: estado.usuario, text: texto,
+    role: 'broadcaster', target, time: Date.now(),
+  };
+  const contato = target || 'locutor';
+  if (!conversas.has(contato)) conversas.set(contato, []);
+  conversas.get(contato).push(msg);
+  input.value = '';
+  renderizarMensagens();
+  input.focus();
+}
+</script>
+</body>
+</html>
