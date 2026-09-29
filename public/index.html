@@ -373,21 +373,30 @@ let wakeLock = null;
 let tentativasReconexao = 0;
 
 /* ==========================================================
-   PLAYER OPUS ROBUSTO
+   PLAYER AAC — sem MediaSource
    ==========================================================
-   - Buffer máximo de 4s no SourceBuffer (evita estouro)
-   - Watchdog reinicia se travar
-   - Limpa buffer em erro de quota
+   O truque: acumula chunks num Blob e toca em sequência.
+   O <audio> nativo do celular toca AAC/MP4 sem cortar.
    ========================================================== */
-let mediaSource = null;
+let mediaSource = null;       // usado só pra fallback (Opus)
 let sourceBuffer = null;
-const filaOpus = [];
 let sbPronto = false;
-let ultimoTempoPlayer = 0;
-let ultimoAvanco = Date.now();
+const filaOpus = [];
 
-const BUFFER_MAX = 4;        // 🔴 mantém só 4s no SourceBuffer
-const WATCHDOG_MS = 60000;   // (não usado diretamente, mas mantido pra referência)
+// Buffer de chunks AAC acumulados
+const chunksAAC = [];
+let tocandoAAC = false;
+let mimeDetectado = null;
+
+const playerAAC = document.createElement('audio');
+playerAAC.autoplay = true;
+playerAAC.playsInline = true;
+playerAAC.preload = 'auto';
+playerAAC.style.display = 'none';
+document.body.appendChild(playerAAC);
+
+// 🔴 Buffer alvo: 3 segundos
+const BUFFER_ALVO = 3;
 const KEEPALIVE_MS = 10000;
 
 /* ==========================================================
@@ -457,121 +466,58 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 /* ==========================================================
-   PLAYER OPUS — MediaSource com buffer curto
+   PLAYER AAC — toca o blob acumulado
    ========================================================== */
-const playerOpus = document.createElement('audio');
-playerOpus.autoplay = true;
-playerOpus.playsInline = true;
-playerOpus.preload = 'auto';
+function tocarBlobAAC() {
+  if (chunksAAC.length === 0) return;
+  if (tocandoAAC) return;
 
-function iniciarMediaSource() {
-  if (mediaSource) return;
+  tocandoAAC = true;
+  const blob = new Blob(chunksAAC, { type: mimeDetectado || 'audio/mp4' });
+  chunksAAC.length = 0;
 
-  mediaSource = new MediaSource();
-  playerOpus.src = URL.createObjectURL(mediaSource);
+  const url = URL.createObjectURL(blob);
+  const antigoSrc = playerAAC.src;
 
-  mediaSource.addEventListener('sourceopen', () => {
-    try {
-      const mime = 'audio/webm; codecs="opus"';
-      if (!MediaSource.isTypeSupported(mime)) {
-        console.warn('⚠️ Opus WebM não suportado');
-        return;
-      }
-      sourceBuffer = mediaSource.addSourceBuffer(mime);
-      sourceBuffer.mode = 'sequence';
+  playerAAC.src = url;
+  playerAAC.play().catch(e => console.warn('play erro:', e.message));
 
-      sourceBuffer.addEventListener('updateend', () => {
-        // Aplica os chunks da fila
-        while (filaOpus.length > 0 && !sourceBuffer.updating) {
-          try {
-            sourceBuffer.appendBuffer(filaOpus.shift());
-          } catch (e) {
-            console.warn('Erro appendBuffer:', e.message);
-            if (e.name === 'QuotaExceededError') {
-              // 🔴 Buffer estourou — limpa tudo e recomeça
-              limparBuffer();
-            }
-            break;
-          }
-        }
+  // Libera o blob antigo depois
+  setTimeout(() => {
+    if (antigoSrc && antigoSrc.startsWith('blob:')) URL.revokeObjectURL(antigoSrc);
+  }, 10000);
 
-        // 🔴 Mantém só BUFFER_MAX segundos no SourceBuffer
-        if (sourceBuffer.buffered.length > 0 && !sourceBuffer.updating) {
-          const inicio = sourceBuffer.buffered.start(0);
-          const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-          if (fim - inicio > BUFFER_MAX) {
-            try {
-              sourceBuffer.remove(0, fim - BUFFER_MAX);
-            } catch (e) {
-              console.warn('Erro remove:', e.message);
-            }
-          }
-        }
-      });
-
-      sourceBuffer.addEventListener('error', (e) => {
-        console.warn('SourceBuffer erro:', e);
-        limparBuffer();
-      });
-
-      sbPronto = true;
-      console.log('✅ MediaSource pronto (buffer ' + BUFFER_MAX + 's)');
-    } catch (e) {
-      console.warn('Erro ao criar SourceBuffer:', e.message);
-    }
-  });
+  // Quando terminar, toca o próximo blob
+  playerAAC.onended = () => {
+    tocandoAAC = false;
+    if (chunksAAC.length > 0) tocarBlobAAC();
+  };
 }
 
-function limparBuffer() {
-  console.log('🧹 Limpando buffer do SourceBuffer');
-  try {
-    if (sourceBuffer && sourceBuffer.buffered.length > 0) {
-      const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-      sourceBuffer.remove(0, fim);
+function tocarChunkBinario(arrayBuffer) {
+  if (!mimeDetectado) {
+    // Detecta pelo header do MP4 (ftyp) ou WebM (EBML)
+    const bytes = new Uint8Array(arrayBuffer.slice(0, 12));
+    const headerStr = String.fromCharCode(...bytes);
+    if (headerStr.includes('ftyp') || headerStr.includes('isom') || headerStr.includes('mp42')) {
+      mimeDetectado = 'audio/mp4';
+    } else if (bytes[0] === 0x1A && bytes[1] === 0x45) {
+      mimeDetectado = 'audio/webm';
+    } else {
+      mimeDetectado = 'audio/mp4';
     }
-  } catch (e) {}
-  filaOpus.length = 0;
-}
-
-function tocarChunkOpus(arrayBuffer) {
-  if (!mediaSource) iniciarMediaSource();
-  if (!sbPronto) { filaOpus.push(arrayBuffer); return; }
-  if (sourceBuffer.updating) { filaOpus.push(arrayBuffer); return; }
-
-  // 🔴 Se a fila tá muito grande, joga fora o que passou
-  if (filaOpus.length > 50) {
-    console.warn('⚠️ Fila muito grande — limpando');
-    filaOpus.length = 0;
+    console.log('📼 Formato detectado:', mimeDetectado);
   }
 
-  try {
-    sourceBuffer.appendBuffer(arrayBuffer);
-  } catch (e) {
-    if (e.name === 'QuotaExceededError') {
-      limparBuffer();
-    }
-    filaOpus.push(arrayBuffer);
+  chunksAAC.push(arrayBuffer);
+
+  // Se já tem ~3 segundos de áudio no buffer, toca
+  // 128kbps = ~16000 bytes/s → 3s = ~48000 bytes
+  const totalBytes = chunksAAC.reduce((s, c) => s + c.byteLength, 0);
+  if (totalBytes > 48000 && !tocandoAAC) {
+    tocarBlobAAC();
   }
 }
-
-/* ==========================================================
-   WATCHDOG — reinicia se o player travar
-   ========================================================== */
-setInterval(() => {
-  if (!estado.tocando) return;
-  const agora = Date.now();
-  if (playerOpus.currentTime > ultimoTempoPlayer + 0.01) {
-    ultimoTempoPlayer = playerOpus.currentTime;
-    ultimoAvanco = agora;
-  } else {
-    // 🔴 Se não avançou por mais de 2s, tá travado
-    if (agora - ultimoAvanco > 2000) {
-      console.warn('🐶 Watchdog: player travado, reiniciando');
-      try { playerOpus.play().catch(() => {}); } catch (e) {}
-      ultimoAvanco = agora;
-    }
-  }
-}, 1000);
 
 /* ==========================================================
    WEBSOCKET
@@ -617,7 +563,7 @@ function conectarWebSocket() {
           }
         } catch (e) { console.warn('Msg inválida:', e); }
       } else {
-        if (estado.tocando) tocarChunkOpus(event.data);
+        if (estado.tocando) tocarChunkBinario(event.data);
       }
     });
 
@@ -707,7 +653,7 @@ btnConfirmarSair.addEventListener('click', () => {
   if (estado.tocando) {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerOpus.pause();
+    playerAAC.pause();
   }
   desativarWakeLock();
   popupChat.classList.remove('ativo');
@@ -732,15 +678,16 @@ btnPlay.addEventListener('click', async () => {
 
   if (estado.tocando) {
     console.log('▶ Tocando');
-    iniciarMediaSource();
-    try { await playerOpus.play(); } catch (e) { console.warn(e); }
+    chunksAAC.length = 0;
+    tocandoAAC = false;
+    mimeDetectado = null;
     await ativarWakeLock();
     registrarMediaSession();
     conectarWebSocket();
   } else {
     console.log('⏸ Pausado');
     await desativarWakeLock();
-    try { playerOpus.pause(); } catch (e) {}
+    try { playerAAC.pause(); } catch (e) {}
   }
 });
 
@@ -767,18 +714,18 @@ function registrarMediaSession() {
   navigator.mediaSession.setActionHandler('play', () => {
     estado.tocando = true;
     btnPlay.classList.add('tocando');
-    playerOpus.play().catch(() => {});
+    playerAAC.play().catch(() => {});
     ativarWakeLock();
   });
   navigator.mediaSession.setActionHandler('pause', () => {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerOpus.pause();
+    playerAAC.pause();
   });
   navigator.mediaSession.setActionHandler('stop', () => {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerOpus.pause();
+    playerAAC.pause();
   });
   navigator.mediaSession.playbackState = 'playing';
 }
@@ -828,7 +775,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v8';
+    const CACHE = 'radio-web-v9';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
