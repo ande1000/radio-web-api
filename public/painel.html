@@ -484,7 +484,7 @@ let ws = null;
 const conversas = new Map();
 
 /* ==========================================================
-   ÁUDIO — OPUS
+   ÁUDIO — AAC
    ========================================================== */
 let audioCtx = null;
 let mixerNode = null;
@@ -623,7 +623,7 @@ async function inicializarAudio() {
   dataArray = new Uint8Array(analyser.frequencyBinCount);
 
   loopAnalise();
-  console.log('🎧 Áudio inicializado (mixer pronto)');
+  console.log('🎧 Áudio inicializado');
 }
 
 function nomeMusicaAtual() {
@@ -631,24 +631,32 @@ function nomeMusicaAtual() {
 }
 
 /* ==========================================================
-   OPUS — MediaRecorder no mixer
-   🔴 CHUNK 400ms
+   AAC — MediaRecorder no mixer (troca Opus por AAC)
    ========================================================== */
-function iniciarTransmissaoOpus() {
+function iniciarTransmissaoAAC() {
   if (mediaRecorder && mediaRecorder.state === 'recording') return;
   if (!mixerNode || !audioCtx) return;
 
   const destino = audioCtx.createMediaStreamDestination();
   limiterNode.connect(destino);
 
-  const mimeOpus = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus'
-    : 'audio/ogg;codecs=opus';
+  // 🔴 AAC em container MP4 — mais compatível em mobile que Opus/WebM
+  let mime = 'audio/mp4';
+  if (!MediaRecorder.isTypeSupported('audio/mp4')) {
+    // Fallback se não suportar MP4
+    mime = 'audio/webm;codecs=opus';
+    console.warn('⚠️ AAC não suportado — usando Opus');
+  }
 
-  mediaRecorder = new MediaRecorder(destino.stream, {
-    mimeType: mimeOpus,
-    audioBitsPerSecond: 64000,
-  });
+  try {
+    mediaRecorder = new MediaRecorder(destino.stream, {
+      mimeType: mime,
+      audioBitsPerSecond: 128000,   // 128 kbps = qualidade CD
+    });
+  } catch (e) {
+    console.warn('Erro ao criar MediaRecorder:', e.message);
+    return;
+  }
 
   mediaRecorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
@@ -656,16 +664,15 @@ function iniciarTransmissaoOpus() {
     }
   };
 
-  // 🔴 400ms: menos pacotes, mais estável ainda
-  mediaRecorder.start(400);
-  console.log('🎙️ Transmissão Opus iniciada (chunk 400ms)');
+  mediaRecorder.start(500);   // 🔴 500ms de chunk (mais estável)
+  console.log('🎙️ Transmissão AAC/MP4 iniciada (chunk 500ms, 128kbps)');
 }
 
-function pararTransmissaoOpus() {
+function pararTransmissaoAAC() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
     mediaRecorder = null;
-    console.log('🎙️ Transmissão Opus parada');
+    console.log('🎙️ Transmissão parada');
   }
 }
 
@@ -708,7 +715,7 @@ btnAoVivo.addEventListener('click', async () => {
       estado.aoVivo = true;
       btnAoVivo.classList.add('ligado');
       btnAoVivo.textContent = 'NO AR';
-      iniciarTransmissaoOpus();
+      iniciarTransmissaoAAC();
       enviarMeta(nomeMusicaAtual());
     } catch (err) { console.warn(err.message); }
   } else {
@@ -716,7 +723,7 @@ btnAoVivo.addEventListener('click', async () => {
     desligarMicrofone();
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
-    if (!estado.musicaTocando) pararTransmissaoOpus();
+    if (!estado.musicaTocando) pararTransmissaoAAC();
   }
 });
 
@@ -769,7 +776,7 @@ function tocarItemDaFila(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'autodj';
   estado.musicaTocando = true;
-  iniciarTransmissaoOpus();
+  iniciarTransmissaoAAC();
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -783,7 +790,7 @@ function proximaMusica() {
       if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
       itemTocandoAgora = null;
       estado.musicaTocando = false;
-      if (!estado.aoVivo) pararTransmissaoOpus();
+      if (!estado.aoVivo) pararTransmissaoAAC();
       return;
     }
   }
@@ -806,7 +813,7 @@ function tocarItemAoVivo(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'aovivo';
   estado.musicaTocando = true;
-  iniciarTransmissaoOpus();
+  iniciarTransmissaoAAC();
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -827,7 +834,7 @@ player.addEventListener('ended', () => {
     itemTocandoAgora.classList.remove('tocando');
     itemTocandoAgora = null;
     estado.musicaTocando = false;
-    if (!estado.aoVivo) pararTransmissaoOpus();
+    if (!estado.aoVivo) pararTransmissaoAAC();
   }
 });
 
@@ -909,7 +916,7 @@ document.getElementById('btnConfirmarSair').addEventListener('click', () => {
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
   }
-  pararTransmissaoOpus();
+  pararTransmissaoAAC();
   if (!player.paused) player.pause();
   if (ws) { ws.close(); ws = null; }
   localStorage.removeItem('painelUsuario');
@@ -985,7 +992,7 @@ function criarItemPlaylist(arquivo, tipo) {
           item.classList.remove('tocando');
           itemTocandoAgora = null;
           estado.musicaTocando = false;
-          if (!estado.aoVivo) pararTransmissaoOpus();
+          if (!estado.aoVivo) pararTransmissaoAAC();
         } else {
           tocarItemDaFila(idx);
         }
@@ -998,7 +1005,7 @@ function criarItemPlaylist(arquivo, tipo) {
           item.classList.remove('tocando');
           itemTocandoAgora = null;
           estado.musicaTocando = false;
-          if (!estado.aoVivo) pararTransmissaoOpus();
+          if (!estado.aoVivo) pararTransmissaoAAC();
         } else {
           tocarItemAoVivo(idx);
         }
@@ -1010,7 +1017,7 @@ function criarItemPlaylist(arquivo, tipo) {
       player.pause();
       itemTocandoAgora = null;
       estado.musicaTocando = false;
-      if (!estado.aoVivo) pararTransmissaoOpus();
+      if (!estado.aoVivo) pararTransmissaoAAC();
     }
     URL.revokeObjectURL(url);
     if (tipo === 'autoDj') {
