@@ -373,12 +373,16 @@ let wakeLock = null;
 let tentativasReconexao = 0;
 
 /* ==========================================================
-   PLAYER OPUS
+   PLAYER OPUS + BUFFER GRANDE
    ========================================================== */
 let mediaSource = null;
 let sourceBuffer = null;
-const filaOpus = [];        // chunks recebidos antes do SourceBuffer estar pronto
+const filaOpus = [];
 let sbPronto = false;
+
+const BUFFER_ALVO = 1.5;    // 🔴 mantém 1.5s de áudio bufferizado
+const BUFFER_MAX  = 30;     // 🔴 só remove do buffer depois de 30s
+const KEEPALIVE_MS = 10000; // 🔴 ping a cada 10s
 
 /* ==========================================================
    DOM
@@ -447,7 +451,7 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 /* ==========================================================
-   PLAYER OPUS — MediaSource
+   PLAYER OPUS — MediaSource com buffer grande
    ========================================================== */
 const playerOpus = document.createElement('audio');
 playerOpus.autoplay = true;
@@ -461,16 +465,16 @@ function iniciarMediaSource() {
 
   mediaSource.addEventListener('sourceopen', () => {
     try {
-      // Opus em WebM
       const mime = 'audio/webm; codecs="opus"';
       if (!MediaSource.isTypeSupported(mime)) {
         console.warn('⚠️ Opus WebM não suportado nesse navegador');
         return;
       }
       sourceBuffer = mediaSource.addSourceBuffer(mime);
-      sourceBuffer.mode = 'sequence';   // 🔴 crucial: toca chunks em sequência
+      sourceBuffer.mode = 'sequence';
+
       sourceBuffer.addEventListener('updateend', () => {
-        // Aplica os chunks que ficaram na fila
+        // Aplica os chunks na fila
         while (filaOpus.length > 0 && !sourceBuffer.updating) {
           try {
             sourceBuffer.appendBuffer(filaOpus.shift());
@@ -479,17 +483,19 @@ function iniciarMediaSource() {
             break;
           }
         }
-        // Se o buffer ficar grande demais, corta o antigo pra não estourar
-        if (sourceBuffer.buffered.length > 0) {
+
+        // 🔴 Só remove do buffer depois de 30s (era 10s)
+        if (sourceBuffer.buffered.length > 0 && !sourceBuffer.updating) {
           const inicio = sourceBuffer.buffered.start(0);
           const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-          if (fim - inicio > 10 && !sourceBuffer.updating) {
-            sourceBuffer.remove(0, fim - 5);
+          if (fim - inicio > BUFFER_MAX) {
+            try { sourceBuffer.remove(0, fim - BUFFER_MAX + 5); } catch (e) {}
           }
         }
       });
+
       sbPronto = true;
-      console.log('✅ MediaSource pronto pra Opus');
+      console.log('✅ MediaSource pronto (buffer alvo ' + BUFFER_ALVO + 's)');
     } catch (e) {
       console.warn('Erro ao criar SourceBuffer:', e.message);
     }
@@ -551,7 +557,6 @@ function conectarWebSocket() {
           }
         } catch (e) { console.warn('Msg inválida:', e); }
       } else {
-        // 🔴 Binário = Opus
         if (estado.tocando) tocarChunkOpus(event.data);
       }
     });
@@ -581,6 +586,17 @@ function atualizarStatusConexao(online) {
   statusConexaoEl.textContent = online ? '● on' : '● off';
   statusConexaoEl.className = 'statusConexao ' + (online ? 'on' : 'off');
 }
+
+/* ==========================================================
+   🔴 KEEPALIVE — ping a cada 10s pra manter WS vivo
+   ========================================================== */
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+    } catch (e) {}
+  }
+}, KEEPALIVE_MS);
 
 /* ==========================================================
    LOGIN
@@ -752,7 +768,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v5';
+    const CACHE = 'radio-web-v6';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
