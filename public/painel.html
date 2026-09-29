@@ -632,7 +632,7 @@ function nomeMusicaAtual() {
 
 /* ==========================================================
    OPUS — MediaRecorder no mixer
-   🔴 CHUNK AUMENTADO: 100ms → 200ms
+   🔴 CHUNK 400ms
    ========================================================== */
 function iniciarTransmissaoOpus() {
   if (mediaRecorder && mediaRecorder.state === 'recording') return;
@@ -656,9 +656,9 @@ function iniciarTransmissaoOpus() {
     }
   };
 
-  // 🔴 200ms em vez de 100ms: menos pacotes, mais estável na rede móvel
-  mediaRecorder.start(200);
-  console.log('🎙️ Transmissão Opus iniciada (chunk 200ms)');
+  // 🔴 400ms: menos pacotes, mais estável ainda
+  mediaRecorder.start(400);
+  console.log('🎙️ Transmissão Opus iniciada (chunk 400ms)');
 }
 
 function pararTransmissaoOpus() {
