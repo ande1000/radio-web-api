@@ -373,15 +373,21 @@ let wakeLock = null;
 let tentativasReconexao = 0;
 
 /* ==========================================================
-   PLAYER OPUS + BUFFER DE 3s
+   PLAYER OPUS ROBUSTO
+   ==========================================================
+   - Buffer máximo de 4s no SourceBuffer (evita estouro)
+   - Watchdog reinicia se travar
+   - Limpa buffer em erro de quota
    ========================================================== */
 let mediaSource = null;
 let sourceBuffer = null;
 const filaOpus = [];
 let sbPronto = false;
+let ultimoTempoPlayer = 0;
+let ultimoAvanco = Date.now();
 
-const BUFFER_ALVO = 3.0;    // 🔴 3s de buffer (era 1.5s)
-const BUFFER_MAX  = 60;     // 🔴 remove só após 60s (era 30s)
+const BUFFER_MAX = 4;        // 🔴 mantém só 4s no SourceBuffer
+const WATCHDOG_MS = 60000;   // (não usado diretamente, mas mantido pra referência)
 const KEEPALIVE_MS = 10000;
 
 /* ==========================================================
@@ -451,11 +457,12 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 /* ==========================================================
-   PLAYER OPUS — MediaSource com buffer de 3s
+   PLAYER OPUS — MediaSource com buffer curto
    ========================================================== */
 const playerOpus = document.createElement('audio');
 playerOpus.autoplay = true;
 playerOpus.playsInline = true;
+playerOpus.preload = 'auto';
 
 function iniciarMediaSource() {
   if (mediaSource) return;
@@ -467,50 +474,104 @@ function iniciarMediaSource() {
     try {
       const mime = 'audio/webm; codecs="opus"';
       if (!MediaSource.isTypeSupported(mime)) {
-        console.warn('⚠️ Opus WebM não suportado nesse navegador');
+        console.warn('⚠️ Opus WebM não suportado');
         return;
       }
       sourceBuffer = mediaSource.addSourceBuffer(mime);
       sourceBuffer.mode = 'sequence';
 
       sourceBuffer.addEventListener('updateend', () => {
+        // Aplica os chunks da fila
         while (filaOpus.length > 0 && !sourceBuffer.updating) {
           try {
             sourceBuffer.appendBuffer(filaOpus.shift());
           } catch (e) {
             console.warn('Erro appendBuffer:', e.message);
+            if (e.name === 'QuotaExceededError') {
+              // 🔴 Buffer estourou — limpa tudo e recomeça
+              limparBuffer();
+            }
             break;
           }
         }
 
-        // 🔴 Remove só após 60s
+        // 🔴 Mantém só BUFFER_MAX segundos no SourceBuffer
         if (sourceBuffer.buffered.length > 0 && !sourceBuffer.updating) {
           const inicio = sourceBuffer.buffered.start(0);
           const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
           if (fim - inicio > BUFFER_MAX) {
-            try { sourceBuffer.remove(0, fim - BUFFER_MAX + 5); } catch (e) {}
+            try {
+              sourceBuffer.remove(0, fim - BUFFER_MAX);
+            } catch (e) {
+              console.warn('Erro remove:', e.message);
+            }
           }
         }
       });
 
+      sourceBuffer.addEventListener('error', (e) => {
+        console.warn('SourceBuffer erro:', e);
+        limparBuffer();
+      });
+
       sbPronto = true;
-      console.log('✅ MediaSource pronto (buffer alvo ' + BUFFER_ALVO + 's)');
+      console.log('✅ MediaSource pronto (buffer ' + BUFFER_MAX + 's)');
     } catch (e) {
       console.warn('Erro ao criar SourceBuffer:', e.message);
     }
   });
 }
 
+function limparBuffer() {
+  console.log('🧹 Limpando buffer do SourceBuffer');
+  try {
+    if (sourceBuffer && sourceBuffer.buffered.length > 0) {
+      const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+      sourceBuffer.remove(0, fim);
+    }
+  } catch (e) {}
+  filaOpus.length = 0;
+}
+
 function tocarChunkOpus(arrayBuffer) {
   if (!mediaSource) iniciarMediaSource();
   if (!sbPronto) { filaOpus.push(arrayBuffer); return; }
   if (sourceBuffer.updating) { filaOpus.push(arrayBuffer); return; }
+
+  // 🔴 Se a fila tá muito grande, joga fora o que passou
+  if (filaOpus.length > 50) {
+    console.warn('⚠️ Fila muito grande — limpando');
+    filaOpus.length = 0;
+  }
+
   try {
     sourceBuffer.appendBuffer(arrayBuffer);
   } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      limparBuffer();
+    }
     filaOpus.push(arrayBuffer);
   }
 }
+
+/* ==========================================================
+   WATCHDOG — reinicia se o player travar
+   ========================================================== */
+setInterval(() => {
+  if (!estado.tocando) return;
+  const agora = Date.now();
+  if (playerOpus.currentTime > ultimoTempoPlayer + 0.01) {
+    ultimoTempoPlayer = playerOpus.currentTime;
+    ultimoAvanco = agora;
+  } else {
+    // 🔴 Se não avançou por mais de 2s, tá travado
+    if (agora - ultimoAvanco > 2000) {
+      console.warn('🐶 Watchdog: player travado, reiniciando');
+      try { playerOpus.play().catch(() => {}); } catch (e) {}
+      ultimoAvanco = agora;
+    }
+  }
+}, 1000);
 
 /* ==========================================================
    WEBSOCKET
@@ -565,7 +626,7 @@ function conectarWebSocket() {
       atualizarStatusConexao(false);
       atualizarStatusAoVivo(false);
       tentativasReconexao++;
-      const delay = Math.min(500 * Math.pow(2, tentativasReconexao - 1), 5000);
+      const delay = Math.min(500 * Math.pow(2, tentativasReconexao - 1), 3000);
       console.log(`🔄 Reconectando em ${delay}ms...`);
       setTimeout(conectarWebSocket, delay);
     });
@@ -767,7 +828,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v7';
+    const CACHE = 'radio-web-v8';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
