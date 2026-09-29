@@ -567,7 +567,7 @@ function atualizarStatusConexao(online) {
 }
 
 /* ==========================================================
-   ÁUDIO — inicialização (mantém mixer pra LEDs e monitor)
+   ÁUDIO — inicialização
    ========================================================== */
 async function inicializarAudio() {
   if (audioCtx) return;
@@ -632,23 +632,22 @@ function nomeMusicaAtual() {
 
 /* ==========================================================
    OPUS — MediaRecorder no mixer
+   🔴 CHUNK AUMENTADO: 100ms → 200ms
    ========================================================== */
 function iniciarTransmissaoOpus() {
   if (mediaRecorder && mediaRecorder.state === 'recording') return;
   if (!mixerNode || !audioCtx) return;
 
-  // Cria um destino MediaStream a partir do mixerNode
   const destino = audioCtx.createMediaStreamDestination();
   limiterNode.connect(destino);
 
-  // Codec Opus a 48kbps, mono (voz) — sem perda perceptível
   const mimeOpus = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : 'audio/ogg;codecs=opus';
 
   mediaRecorder = new MediaRecorder(destino.stream, {
     mimeType: mimeOpus,
-    audioBitsPerSecond: 64000,   // 64 kbps: ótimo pra voz + música
+    audioBitsPerSecond: 64000,
   });
 
   mediaRecorder.ondataavailable = (e) => {
@@ -657,9 +656,9 @@ function iniciarTransmissaoOpus() {
     }
   };
 
-  // Envia um chunk a cada 100ms (latência aceitável e boa estabilidade)
-  mediaRecorder.start(100);
-  console.log('🎙️ Transmissão Opus iniciada');
+  // 🔴 200ms em vez de 100ms: menos pacotes, mais estável na rede móvel
+  mediaRecorder.start(200);
+  console.log('🎙️ Transmissão Opus iniciada (chunk 200ms)');
 }
 
 function pararTransmissaoOpus() {
@@ -717,7 +716,6 @@ btnAoVivo.addEventListener('click', async () => {
     desligarMicrofone();
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
-    // Se não estiver tocando música, para a transmissão
     if (!estado.musicaTocando) pararTransmissaoOpus();
   }
 });
@@ -771,7 +769,7 @@ function tocarItemDaFila(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'autodj';
   estado.musicaTocando = true;
-  iniciarTransmissaoOpus();       // 🔴 começa a transmitir
+  iniciarTransmissaoOpus();
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -808,7 +806,7 @@ function tocarItemAoVivo(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'aovivo';
   estado.musicaTocando = true;
-  iniciarTransmissaoOpus();       // 🔴 começa a transmitir
+  iniciarTransmissaoOpus();
   enviarMeta(entrada.arquivo.name);
 }
 
