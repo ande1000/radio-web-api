@@ -373,30 +373,13 @@ let wakeLock = null;
 let tentativasReconexao = 0;
 
 /* ==========================================================
-   PLAYER AAC — sem MediaSource
-   ==========================================================
-   O truque: acumula chunks num Blob e toca em sequência.
-   O <audio> nativo do celular toca AAC/MP4 sem cortar.
+   PLAYER PCM — Web Audio API com buffer grande
    ========================================================== */
-let mediaSource = null;       // usado só pra fallback (Opus)
-let sourceBuffer = null;
-let sbPronto = false;
-const filaOpus = [];
+let audioCtx = null;
+let proximoInicio = 0;
+let bufferSegundos = 0;
 
-// Buffer de chunks AAC acumulados
-const chunksAAC = [];
-let tocandoAAC = false;
-let mimeDetectado = null;
-
-const playerAAC = document.createElement('audio');
-playerAAC.autoplay = true;
-playerAAC.playsInline = true;
-playerAAC.preload = 'auto';
-playerAAC.style.display = 'none';
-document.body.appendChild(playerAAC);
-
-// 🔴 Buffer alvo: 3 segundos
-const BUFFER_ALVO = 3;
+const BUFFER_ALVO = 5;       // 🔴 5 segundos de buffer
 const KEEPALIVE_MS = 10000;
 
 /* ==========================================================
@@ -466,57 +449,58 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 /* ==========================================================
-   PLAYER AAC — toca o blob acumulado
+   ÁUDIO — inicialização
    ========================================================== */
-function tocarBlobAAC() {
-  if (chunksAAC.length === 0) return;
-  if (tocandoAAC) return;
-
-  tocandoAAC = true;
-  const blob = new Blob(chunksAAC, { type: mimeDetectado || 'audio/mp4' });
-  chunksAAC.length = 0;
-
-  const url = URL.createObjectURL(blob);
-  const antigoSrc = playerAAC.src;
-
-  playerAAC.src = url;
-  playerAAC.play().catch(e => console.warn('play erro:', e.message));
-
-  // Libera o blob antigo depois
-  setTimeout(() => {
-    if (antigoSrc && antigoSrc.startsWith('blob:')) URL.revokeObjectURL(antigoSrc);
-  }, 10000);
-
-  // Quando terminar, toca o próximo blob
-  playerAAC.onended = () => {
-    tocandoAAC = false;
-    if (chunksAAC.length > 0) tocarBlobAAC();
-  };
+function initAudio() {
+  if (audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AC({
+    sampleRate: 48000,
+    latencyHint: 'playback',   // 🔴 prioriza estabilidade
+  });
+  proximoInicio = audioCtx.currentTime + 0.1;
+  console.log('🎧 AudioContext PCM iniciado (48kHz)');
 }
 
-function tocarChunkBinario(arrayBuffer) {
-  if (!mimeDetectado) {
-    // Detecta pelo header do MP4 (ftyp) ou WebM (EBML)
-    const bytes = new Uint8Array(arrayBuffer.slice(0, 12));
-    const headerStr = String.fromCharCode(...bytes);
-    if (headerStr.includes('ftyp') || headerStr.includes('isom') || headerStr.includes('mp42')) {
-      mimeDetectado = 'audio/mp4';
-    } else if (bytes[0] === 0x1A && bytes[1] === 0x45) {
-      mimeDetectado = 'audio/webm';
-    } else {
-      mimeDetectado = 'audio/mp4';
-    }
-    console.log('📼 Formato detectado:', mimeDetectado);
+/* ==========================================================
+   TOCAR CHUNK PCM (Int16 → Float32 → agenda)
+   ========================================================== */
+function tocarChunkPCM(arrayBuffer) {
+  if (!estado.tocando) return;
+  initAudio();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  const int16 = new Int16Array(arrayBuffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    float32[i] = int16[i] / 32768;
   }
 
-  chunksAAC.push(arrayBuffer);
+  const buffer = audioCtx.createBuffer(1, float32.length, audioCtx.sampleRate);
+  buffer.copyToChannel(float32, 0);
 
-  // Se já tem ~3 segundos de áudio no buffer, toca
-  // 128kbps = ~16000 bytes/s → 3s = ~48000 bytes
-  const totalBytes = chunksAAC.reduce((s, c) => s + c.byteLength, 0);
-  if (totalBytes > 48000 && !tocandoAAC) {
-    tocarBlobAAC();
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+
+  const agora = audioCtx.currentTime;
+
+  // Se o buffer tá muito grande, pula pra frente
+  if (proximoInicio > agora + BUFFER_ALVO) {
+    console.log('⚠️ Buffer muito grande, pulando');
+    proximoInicio = agora + 0.2;
   }
+
+  // Se o buffer esvaziou (atrasou), reinicia
+  if (proximoInicio < agora - 0.5) {
+    console.log('⚠️ Buffer esvaziou, reiniciando');
+    proximoInicio = agora + 0.1;
+  }
+
+  const inicio = Math.max(agora + 0.05, proximoInicio);
+  source.start(inicio);
+  proximoInicio = inicio + buffer.duration;
+  bufferSegundos = proximoInicio - agora;
 }
 
 /* ==========================================================
@@ -563,7 +547,7 @@ function conectarWebSocket() {
           }
         } catch (e) { console.warn('Msg inválida:', e); }
       } else {
-        if (estado.tocando) tocarChunkBinario(event.data);
+        if (estado.tocando) tocarChunkPCM(event.data);
       }
     });
 
@@ -653,7 +637,6 @@ btnConfirmarSair.addEventListener('click', () => {
   if (estado.tocando) {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerAAC.pause();
   }
   desativarWakeLock();
   popupChat.classList.remove('ativo');
@@ -678,16 +661,16 @@ btnPlay.addEventListener('click', async () => {
 
   if (estado.tocando) {
     console.log('▶ Tocando');
-    chunksAAC.length = 0;
-    tocandoAAC = false;
-    mimeDetectado = null;
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    proximoInicio = audioCtx.currentTime + 0.1;
     await ativarWakeLock();
     registrarMediaSession();
     conectarWebSocket();
   } else {
     console.log('⏸ Pausado');
     await desativarWakeLock();
-    try { playerAAC.pause(); } catch (e) {}
+    proximoInicio = audioCtx ? audioCtx.currentTime : 0;
   }
 });
 
@@ -714,18 +697,17 @@ function registrarMediaSession() {
   navigator.mediaSession.setActionHandler('play', () => {
     estado.tocando = true;
     btnPlay.classList.add('tocando');
-    playerAAC.play().catch(() => {});
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     ativarWakeLock();
   });
   navigator.mediaSession.setActionHandler('pause', () => {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerAAC.pause();
   });
   navigator.mediaSession.setActionHandler('stop', () => {
     estado.tocando = false;
     btnPlay.classList.remove('tocando');
-    playerAAC.pause();
   });
   navigator.mediaSession.playbackState = 'playing';
 }
@@ -775,7 +757,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v9';
+    const CACHE = 'radio-web-v10';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
