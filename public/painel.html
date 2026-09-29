@@ -484,18 +484,18 @@ let ws = null;
 const conversas = new Map();
 
 /* ==========================================================
-   ÁUDIO — AAC
+   ÁUDIO — PCM
    ========================================================== */
 let audioCtx = null;
 let mixerNode = null;
 let limiterNode = null;
 let micSource = null;
 let playerSource = null;
+let processorNode = null;
 let micGain = null;
 let mediaGain = null;
 let monitorGain = null;
 let micStream = null;
-let mediaRecorder = null;
 
 /* ==========================================================
    PLAYER + ANALISADOR
@@ -622,63 +622,39 @@ async function inicializarAudio() {
   limiterNode.connect(analyser);
   dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+  // 🔴 VOLTA PRO PCM: ScriptProcessor envia Int16 puro
+  processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  processorNode.onaudioprocess = (e) => {
+    const deveEnviar = estado.aoVivo || estado.musicaTocando;
+    if (!deveEnviar || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const input = e.inputBuffer.getChannelData(0);
+    const int16 = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    ws.send(int16.buffer);
+
+    if (!estado.transmitindo) {
+      estado.transmitindo = true;
+      ws.send(JSON.stringify({ type: 'meta', live: true, title: nomeMusicaAtual() }));
+    }
+  };
+  limiterNode.connect(processorNode);
+  const silencio = audioCtx.createGain();
+  silencio.gain.value = 0;
+  processorNode.connect(silencio);
+  silencio.connect(audioCtx.destination);
+
   loopAnalise();
-  console.log('🎧 Áudio inicializado');
+  console.log('🎧 Áudio PCM inicializado (48kHz Int16)');
 }
 
 function nomeMusicaAtual() {
   return itemTocandoAgora ? itemTocandoAgora.querySelector('.info span').textContent : 'Radio Web';
 }
 
-/* ==========================================================
-   AAC — MediaRecorder no mixer (troca Opus por AAC)
-   ========================================================== */
-function iniciarTransmissaoAAC() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') return;
-  if (!mixerNode || !audioCtx) return;
-
-  const destino = audioCtx.createMediaStreamDestination();
-  limiterNode.connect(destino);
-
-  // 🔴 AAC em container MP4 — mais compatível em mobile que Opus/WebM
-  let mime = 'audio/mp4';
-  if (!MediaRecorder.isTypeSupported('audio/mp4')) {
-    // Fallback se não suportar MP4
-    mime = 'audio/webm;codecs=opus';
-    console.warn('⚠️ AAC não suportado — usando Opus');
-  }
-
-  try {
-    mediaRecorder = new MediaRecorder(destino.stream, {
-      mimeType: mime,
-      audioBitsPerSecond: 128000,   // 128 kbps = qualidade CD
-    });
-  } catch (e) {
-    console.warn('Erro ao criar MediaRecorder:', e.message);
-    return;
-  }
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(e.data);
-    }
-  };
-
-  mediaRecorder.start(500);   // 🔴 500ms de chunk (mais estável)
-  console.log('🎙️ Transmissão AAC/MP4 iniciada (chunk 500ms, 128kbps)');
-}
-
-function pararTransmissaoAAC() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-    mediaRecorder = null;
-    console.log('🎙️ Transmissão parada');
-  }
-}
-
-/* ==========================================================
-   MICROFONE
-   ========================================================== */
 async function ligarMicrofone() {
   if (micSource) return;
   try {
@@ -715,7 +691,6 @@ btnAoVivo.addEventListener('click', async () => {
       estado.aoVivo = true;
       btnAoVivo.classList.add('ligado');
       btnAoVivo.textContent = 'NO AR';
-      iniciarTransmissaoAAC();
       enviarMeta(nomeMusicaAtual());
     } catch (err) { console.warn(err.message); }
   } else {
@@ -723,7 +698,6 @@ btnAoVivo.addEventListener('click', async () => {
     desligarMicrofone();
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
-    if (!estado.musicaTocando) pararTransmissaoAAC();
   }
 });
 
@@ -776,7 +750,6 @@ function tocarItemDaFila(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'autodj';
   estado.musicaTocando = true;
-  iniciarTransmissaoAAC();
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -790,7 +763,6 @@ function proximaMusica() {
       if (itemTocandoAgora) itemTocandoAgora.classList.remove('tocando');
       itemTocandoAgora = null;
       estado.musicaTocando = false;
-      if (!estado.aoVivo) pararTransmissaoAAC();
       return;
     }
   }
@@ -813,7 +785,6 @@ function tocarItemAoVivo(index) {
   itemTocandoAgora._indice = index;
   itemTocandoAgora._origem = 'aovivo';
   estado.musicaTocando = true;
-  iniciarTransmissaoAAC();
   enviarMeta(entrada.arquivo.name);
 }
 
@@ -834,7 +805,6 @@ player.addEventListener('ended', () => {
     itemTocandoAgora.classList.remove('tocando');
     itemTocandoAgora = null;
     estado.musicaTocando = false;
-    if (!estado.aoVivo) pararTransmissaoAAC();
   }
 });
 
@@ -916,7 +886,6 @@ document.getElementById('btnConfirmarSair').addEventListener('click', () => {
     btnAoVivo.classList.remove('ligado');
     btnAoVivo.textContent = 'AO VIVO';
   }
-  pararTransmissaoAAC();
   if (!player.paused) player.pause();
   if (ws) { ws.close(); ws = null; }
   localStorage.removeItem('painelUsuario');
@@ -992,7 +961,6 @@ function criarItemPlaylist(arquivo, tipo) {
           item.classList.remove('tocando');
           itemTocandoAgora = null;
           estado.musicaTocando = false;
-          if (!estado.aoVivo) pararTransmissaoAAC();
         } else {
           tocarItemDaFila(idx);
         }
@@ -1005,7 +973,6 @@ function criarItemPlaylist(arquivo, tipo) {
           item.classList.remove('tocando');
           itemTocandoAgora = null;
           estado.musicaTocando = false;
-          if (!estado.aoVivo) pararTransmissaoAAC();
         } else {
           tocarItemAoVivo(idx);
         }
@@ -1017,7 +984,6 @@ function criarItemPlaylist(arquivo, tipo) {
       player.pause();
       itemTocandoAgora = null;
       estado.musicaTocando = false;
-      if (!estado.aoVivo) pararTransmissaoAAC();
     }
     URL.revokeObjectURL(url);
     if (tipo === 'autoDj') {
