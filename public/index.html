@@ -373,16 +373,16 @@ let wakeLock = null;
 let tentativasReconexao = 0;
 
 /* ==========================================================
-   PLAYER OPUS + BUFFER GRANDE
+   PLAYER OPUS + BUFFER DE 3s
    ========================================================== */
 let mediaSource = null;
 let sourceBuffer = null;
 const filaOpus = [];
 let sbPronto = false;
 
-const BUFFER_ALVO = 1.5;    // 🔴 mantém 1.5s de áudio bufferizado
-const BUFFER_MAX  = 30;     // 🔴 só remove do buffer depois de 30s
-const KEEPALIVE_MS = 10000; // 🔴 ping a cada 10s
+const BUFFER_ALVO = 3.0;    // 🔴 3s de buffer (era 1.5s)
+const BUFFER_MAX  = 60;     // 🔴 remove só após 60s (era 30s)
+const KEEPALIVE_MS = 10000;
 
 /* ==========================================================
    DOM
@@ -451,7 +451,7 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 /* ==========================================================
-   PLAYER OPUS — MediaSource com buffer grande
+   PLAYER OPUS — MediaSource com buffer de 3s
    ========================================================== */
 const playerOpus = document.createElement('audio');
 playerOpus.autoplay = true;
@@ -474,7 +474,6 @@ function iniciarMediaSource() {
       sourceBuffer.mode = 'sequence';
 
       sourceBuffer.addEventListener('updateend', () => {
-        // Aplica os chunks na fila
         while (filaOpus.length > 0 && !sourceBuffer.updating) {
           try {
             sourceBuffer.appendBuffer(filaOpus.shift());
@@ -484,7 +483,7 @@ function iniciarMediaSource() {
           }
         }
 
-        // 🔴 Só remove do buffer depois de 30s (era 10s)
+        // 🔴 Remove só após 60s
         if (sourceBuffer.buffered.length > 0 && !sourceBuffer.updating) {
           const inicio = sourceBuffer.buffered.start(0);
           const fim = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
@@ -588,7 +587,7 @@ function atualizarStatusConexao(online) {
 }
 
 /* ==========================================================
-   🔴 KEEPALIVE — ping a cada 10s pra manter WS vivo
+   KEEPALIVE
    ========================================================== */
 setInterval(() => {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -768,7 +767,7 @@ function adicionarMensagem({ autor, texto, eu = false }) {
    ========================================================== */
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'radio-web-v6';
+    const CACHE = 'radio-web-v7';
     self.addEventListener('install', (e) => {
       e.waitUntil(caches.open(CACHE).then(c => c.add('./')));
       self.skipWaiting();
